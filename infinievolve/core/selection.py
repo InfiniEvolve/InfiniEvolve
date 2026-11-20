@@ -49,6 +49,28 @@ def best_node(nodes: list[Node], metric: Metric) -> Node | None:
     return best
 
 
+def reference_node(nodes: list[Node], metric: Metric) -> Node | None:
+    """The node the others are compared with: the baseline when it ranks, else the first session that does
+    (a task may start from nothing, and then the first valid work is the yardstick). Derived from the
+    archive each time, so flagging or clearing a node moves it without anything to repair."""
+    ranked = sorted(eligible(nodes, metric), key=lambda node: node.index)
+    return ranked[0] if ranked else None
+
+
+def versus(metric: Metric, value, reference) -> float | None:
+    """A value against the reference's: their quotient on a ratio scale, their difference otherwise."""
+    if not metric.usable(value) or not metric.usable(reference):
+        return None
+    return value / reference if metric.scale == "ratio" else value - reference
+
+
+def versus_text(metric: Metric, value, reference) -> str:
+    compared = versus(metric, value, reference)
+    if compared is None:
+        return "-"
+    return f"{compared:.2f}x" if metric.scale == "ratio" else ("+" if compared >= 0 else "-") + metric.text(abs(compared))
+
+
 def children(nodes: list[Node]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for node in nodes:

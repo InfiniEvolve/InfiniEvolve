@@ -23,7 +23,7 @@ from . import selection, stopping
 from .adapter import Adapter, AgentUnavailable, HostFault, JobFailed
 from .archive import CampaignStore, TaskStore, read_json, sha256_bytes, write_json
 from .events import now, parse_time
-from .schema import Declaration, parse_declaration
+from .schema import AGGREGATES, Declaration, parse_declaration
 from .types import ROOT_ID, Job, Node, ScoreRow, SessionResult, SessionSpec, session_id
 from .views import current_stop, write_matrix, write_summary
 
@@ -140,25 +140,65 @@ class TaskLoop:
         return jobs
 
     # -- confirming a new best ---------------------------------------------------------
-    def check_confirmation(self, node: Node) -> None:
-        """A new best of a task that declares `confirm` is scored that many more times and ranked by the
-        aggregate, so one lucky measurement does not become the start of every later session."""
+    def check_confirmation(self, node: Node, distrusted: str | None = None) -> None:
+        """Score a node's work again where one scoring is not enough: a new best of a task that declares
+        `confirm` (one lucky measurement must not become the start of every later session), and any
+        measurement its adapter does not trust. The node is then ranked by the aggregate."""
         declaration = self.declaration()
-        metric = declaration.rank
-        if not declaration.confirm or node.is_root or node.excluded or not node.valid \
-                or not metric.usable(node.rank_value):
+        metric, confirm = declaration.rank, declaration.confirm
+        if not hasattr(self.adapter, "submit_rescore") or node.excluded or not node.valid:
             return
-        others = [other for other in self.ranked(self.store.nodes()) if other.session_id != node.session_id]
-        best = selection.best_node(others, metric)
-        if best is not None and not metric.better(node.rank_value, best.rank_value):
+        if distrusted:
+            samples, why = max(2, confirm.samples if confirm else 2), f"its measurement is not trusted: {distrusted}"
+        elif confirm and not node.is_root and metric.usable(node.rank_value):
+            others = [other for other in self.ranked(self.store.nodes()) if other.session_id != node.session_id]
+            best = selection.best_node(others, metric)
+            if best is not None and not metric.better(node.rank_value, best.rank_value):
+                return
+            samples, why = confirm.samples, f"new best {metric.text(node.rank_value)}"
+        else:
             return
         directory = self.store.session_dir(node.session_id) / "confirm"
-        write_json(directory / "needed.json", {"samples": declaration.confirm.samples, "original": node.rank_value,
+        write_json(directory / "needed.json", {"samples": samples, "original": node.rank_value, "reason": why,
+                                               "aggregate": confirm.aggregate if confirm else "median",
                                                "where": node.timing.get("where"), "detected_at": now()})
-        self.store.events.emit("confirmation_needed", node.session_id, samples=declaration.confirm.samples,
-                               original=node.rank_value)
-        self.log(f"[{self.task}/{node.session_id}] new best {metric.text(node.rank_value)}; scoring it "
-                 f"{declaration.confirm.samples} more time(s) before it is trusted")
+        self.store.events.emit("confirmation_needed", node.session_id, samples=samples, original=node.rank_value,
+                               reason=why)
+        self.log(f"[{self.task}/{node.session_id}] {why}; scoring it {samples} more time(s) before it is trusted")
+
+    def pool(self, fingerprint: str | None) -> None:
+        """Nodes whose work is identical are one piece of work measured several times: rank each of them by
+        the aggregate of all those measurements, so that no copy wins on the luck of its own."""
+        declaration = self.declaration()
+        metric = declaration.rank
+        same = [node for node in self.store.nodes() if fingerprint is not None and not node.void and node.valid
+                and node.artifact.get("fingerprint") == fingerprint]
+        if len(same) < 2:
+            return
+        values = [value for node in same for value in self.measurements(node, metric)]
+        if not values:
+            return
+        how = declaration.confirm.aggregate if declaration.confirm else "median"
+        value = AGGREGATES[how](values)
+        for node in same:
+            if node.rank_value != value:
+                previous, node.rank_value = node.rank_value, value
+                node.chosen().setdefault("extra", {})["pooled"] = {
+                    "values": values, "aggregate": how, "nodes": [other.session_id for other in same]}
+                self.store.update_node(node)
+                self.store.events.emit("rescored", node.session_id, values=values, value=value, previous=previous,
+                                       pooled_with=[other.session_id for other in same])
+        self.log(f"[{self.task}] {', '.join(node.session_id for node in same)} hold the same work: each ranked by "
+                 f"{metric.text(value)}, the {how} of its {len(values)} measurements")
+        write_matrix(self.store)
+
+    @staticmethod
+    def measurements(node: Node, metric) -> list:
+        """Every usable value this node's own work was measured at: its scoring, and any repeat scorings."""
+        row = node.chosen()
+        values = [(row.get("metrics") or {}).get(metric.name)]
+        values += [sample.get("value") for sample in ((row.get("extra") or {}).get("confirmation") or {}).get("samples", [])]
+        return [value for value in values if metric.usable(value)]
 
     def _confirm_dirs(self) -> list[Path]:
         return sorted(path.parent for path in (self.store.root / "sessions").glob("*/confirm/needed.json")
@@ -179,6 +219,7 @@ class TaskLoop:
         places = [read_json(directory / "needed.json").get("where")] + [read_json(path).get("where") for path in done]
         avoid = tuple(sorted({place for place in places if place}))
         name = f"{sid}-c{attempt}"
+        self._write_reference(directory / f"r{attempt}" / "input", self.ranked(self.store.nodes()), self.declaration())
         handle = self.adapter.submit_rescore(self.task, name, self.store.artifact(sid), directory / f"r{attempt}",
                                              self.store.events, avoid=avoid)
         job = Job(self.task, name, "confirm", handle, now())
@@ -203,12 +244,13 @@ class TaskLoop:
         samples = [read_json(path) for path in sorted(directory.glob("r*/sample.json"))]
         if len(samples) < needed["samples"]:
             return
-        values = [needed["original"]] + [item["value"] for item in samples if item["value"] is not None]
-        combined = confirm.combine(values) if confirm else values[0]
+        how = needed.get("aggregate") or (confirm.aggregate if confirm else "median")
+        values = [value for value in [needed["original"]] + [item["value"] for item in samples] if value is not None]
         node = self.store.node(sid)
+        combined = AGGREGATES[how](values) if values else node.rank_value
         node.rank_value = combined
         node.chosen().setdefault("extra", {})["confirmation"] = {
-            "original": needed["original"], "samples": samples, "aggregate": confirm.aggregate if confirm else None}
+            "original": needed["original"], "samples": samples, "aggregate": how, "reason": needed.get("reason")}
         failed = [item for item in samples if not item["valid"]]
         if failed:   # a second scoring that rejects the work contradicts the first: a person decides
             node.flags["confirmation_failed"] = {
@@ -219,9 +261,10 @@ class TaskLoop:
         self.store.update_node(node)
         write_json(directory / "outcome.json", {"values": values, "value": combined, "failed": len(failed)})
         self.store.events.emit("rescored", sid, values=values, value=combined, previous=needed["original"])
-        self.log(f"[{self.task}/{sid}] ranked by {metric.text(combined)}, the "
-                 f"{confirm.aggregate if confirm else 'value'} of {[metric.text(v) for v in values]}")
+        self.log(f"[{self.task}/{sid}] ranked by {metric.text(combined)}, the {how} of "
+                 f"{[metric.text(v) for v in values]}")
         write_matrix(self.store)
+        self.pool(node.artifact.get("fingerprint"))
 
     # -- the next job ------------------------------------------------------------------
     def next_job(self) -> Job | None:
@@ -321,8 +364,10 @@ class TaskLoop:
         if job.kind == "baseline":
             self.store.events.emit("baseline_scored", ROOT_ID, value=node.rank_value, valid=node.valid)
         self.log(self._summary(node))
-        if "duplicate" not in node.flags:   # scoring the same work again would say nothing new
-            self.check_confirmation(node)
+        if "duplicate" in node.flags:   # the same work measured once more: all its copies share what was measured
+            self.pool(node.artifact.get("fingerprint"))
+            node = self.store.node(node.session_id)
+        self.check_confirmation(node, distrusted=result.remeasure)
         return node
 
     def pause(self, where: str, error: Exception) -> None:
@@ -379,6 +424,7 @@ class TaskLoop:
             (directory / "archive.md").write_text(archive_md)
         if start:
             (directory / f"start{kind.suffix}").write_bytes(start)
+        reference = self._write_reference(directory, ranked, declaration)
         write_json(directory / "selection.json", chosen.to_dict())
         self.store.events.emit("selection", sid, **chosen.to_dict())
         self.store.events.emit("prompt_rendered", sid, prompt_chars=len(text), archive_chars=len(archive_md),
@@ -389,8 +435,19 @@ class TaskLoop:
             "start_strategy": self.settings.start, "time_limit_seconds": self.time_limit_seconds(),
             "time_limit_source": "config" if self.settings.session_minutes is not None else "task",
             "agent": self.settings.agent, "start_file": f"start{kind.suffix}" if start else None,
-            "start_sha256": sha256_bytes(start) if start else None, "prepared_at": now()})
+            "start_sha256": sha256_bytes(start) if start else None, "reference_id": reference,
+            "prepared_at": now()})
         return self._load_spec(sid)
+
+    def _write_reference(self, directory: Path, ranked: list[Node], declaration: Declaration) -> str | None:
+        """Put the reference node's work beside a job's inputs (input/reference<suffix>), for adapters that
+        measure against it. Nothing is written when the reference is the baseline, or when there is none."""
+        reference = selection.reference_node(ranked, declaration.rank)
+        if reference is not None and not reference.is_root:
+            directory.mkdir(parents=True, exist_ok=True)
+            suffix = artifact_kind(declaration.artifact).suffix
+            (directory / f"reference{suffix}").write_bytes(self.store.artifact(reference.session_id))
+        return reference.session_id if reference else None
 
     def _load_spec(self, sid: str) -> SessionSpec:
         directory = self.store.session_dir(sid) / "input"

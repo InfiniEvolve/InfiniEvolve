@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .core.archive import CampaignStore, TaskStore, write_json
 from .core.prompt import metric_value
+from .core.selection import reference_node, versus
 from .core.stopping import best_curve
 
 
@@ -62,10 +63,14 @@ def export(store: CampaignStore, tasks: list[str]) -> Path:
         write_json(out / task / "lineage.json", graph)
         (out / task / "lineage.dot").write_text(dot(graph))
         (out / task / "lineage.mmd").write_text(mermaid(graph))
-        metric_names += [name for name in declaration.metrics if name not in metric_names]
+        metric_names += [name for name in declaration.metric_names() if name not in metric_names]
         nodes = task_store.nodes()
+        reference = reference_node([node for node in nodes if not node.void], declaration.rank)
         for node in nodes:
             node_rows.append({
+                "reference": reference.session_id if reference else None,
+                "vs_reference": versus(declaration.rank, node.rank_value, reference.rank_value)
+                if reference and node.valid else None,
                 "task": task, "session": node.session_id, "index": node.index, "parent": node.parent_id,
                 "start": node.start_strategy, "scored": node.chosen_label, "valid": node.valid,
                 "rank_metric": node.rank_metric, "rank_value": node.rank_value,
@@ -88,7 +93,8 @@ def export(store: CampaignStore, tasks: list[str]) -> Path:
         for place, value in enumerate(curve):
             session = "start" if place == 0 else [node for node in real if not node.is_root][place - 1].session_id
             best_rows.append({"task": task, "sessions": place, "session": session, "best": value})
-    fixed = ["task", "session", "index", "parent", "start", "scored", "valid", "rank_metric", "rank_value"]
+    fixed = ["task", "session", "index", "parent", "start", "scored", "valid", "rank_metric", "rank_value",
+             "reference", "vs_reference"]
     tail = ["flags", "flags_cleared", "void", "excluded", "artifact_kind", "artifact_fingerprint", "agent",
             "agent_seconds", "wall_seconds", "usage", "error", "archived_at"]
     write_csv(out / "nodes.csv", node_rows, fixed + metric_names + tail)

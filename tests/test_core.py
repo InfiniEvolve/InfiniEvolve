@@ -33,7 +33,7 @@ def metric(**spec):
 # -- declaration -----------------------------------------------------------------------------
 def test_a_declaration_with_one_metric_ranks_by_it():
     declaration = parse_declaration({"metrics": {"size": {"direction": "min"}}})
-    assert declaration.rank_by == "size" and declaration.show == ("size",) and declaration.gate == ()
+    assert declaration.rank_by == "size" and declaration.show == ("size",) and declaration.gate is None
     assert parse_declaration(declaration.to_dict()) == declaration
 
 
@@ -154,29 +154,120 @@ def test_the_framework_names_no_kind_of_task():
     assert not found, "\n".join(found)
 
 
-# -- the example, end to end ----------------------------------------------------------------
-@pytest.mark.skipif(shutil.which("git") is None, reason="the local example adapter needs git")
-def test_the_local_example_runs(tmp_path, capsys):
-    example = tmp_path / "local"
-    shutil.copytree(REPOSITORY / "examples" / "local", example,
-                    ignore=shutil.ignore_patterns("__pycache__"))
-    root = example / "campaigns" / "demo"
-    for leftover in ("tasks", "events.jsonl", "state.json", "summary.json", "summary.md", "provenance.json", "exports"):
-        path = root / leftover
-        shutil.rmtree(path) if path.is_dir() else path.unlink(missing_ok=True)
-    assert main(["run", str(root)]) == 0
-    assert main(["export", str(root)]) == 0
-    assert main(["flag", str(root), "--task", "golf", "--session", "s005", "--flag", "checked_by_hand",
+# -- the example and the task-directory commands, end to end -----------------------------------
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="the local adapter needs git")
+
+
+@needs_git
+def test_the_example_runs_from_its_task_directory(tmp_path, capsys):
+    task = tmp_path / "golf"
+    shutil.copytree(REPOSITORY / "examples" / "golf", task, ignore=shutil.ignore_patterns("__pycache__", "runs"))
+    assert main(["run", str(task)]) == 0
+    assert main(["export", str(task)]) == 0
+    assert main(["flag", str(task), "--task", "golf", "--session", "s005", "--flag", "checked_by_hand",
                  "--reason", "looked wrong", "--level", "hard"]) == 0
-    assert main(["report", str(root), "--task", "golf"]) == 0
+    assert main(["report", str(task), "--task", "golf"]) == 0
     printed = capsys.readouterr().out
-    assert "| golf | bytes |" in printed and "checked_by_hand (hard)" in printed
-    task = root / "tasks" / "golf"
-    final = (task / "archive" / "artifacts" / "s005.patch").read_bytes()
+    assert "| golf | bytes | 8 | 8 | s000 466 |" in printed and "checked_by_hand (hard)" in printed
+    assert "Reference: s000." in printed
+    run = task / "runs" / "default"
+    prompt = (run / "tasks" / "golf" / "sessions" / "s002" / "input" / "prompt.md").read_text()
+    assert "How your work is ranked: by `bytes`, lower being better, among versions that pass every check." in prompt
+    final = (run / "tasks" / "golf" / "archive" / "artifacts" / "s005.patch").read_bytes()
     work = tmp_path / "check"
-    shutil.copytree(example / "tasks" / "golf" / "workspace", work)
+    shutil.copytree(task / "workspace", work)
     subprocess.run(["git", "init", "-q"], cwd=work, check=True)
     subprocess.run(["git", "apply", "-"], cwd=work, input=final, check=True)
     assert (work / "solution.py").stat().st_size == 163          # the archived work reproduces the score
-    assert (root / "exports" / "golf" / "lineage.mmd").is_file()
-    assert "s004" in (root / "exports" / "best_so_far.csv").read_text()
+    assert (run / "exports" / "golf" / "lineage.mmd").is_file()
+    assert "s004" in (run / "exports" / "best_so_far.csv").read_text()
+
+
+@needs_git
+def test_a_new_task_directory_runs_with_three_edits(tmp_path, capsys):
+    task = tmp_path / "shorter"
+    assert main(["init", str(task)]) == 0
+    assert main(["init", str(task)]) == 1                         # never over what is there
+    (task / "workspace" / "note.txt").write_text("a rather long sentence\n")
+    (task / "evaluate.py").write_text(
+        "import json, pathlib\n"
+        "size = pathlib.Path('note.txt').stat().st_size\n"
+        "print(json.dumps({'checks': {'not_empty': size > 0}, 'metrics': {'score': -size}}))\n")
+    agent = "python3 -c \"import pathlib; p = pathlib.Path('note.txt'); p.write_text(p.read_text()[:-2])\""
+    assert main(["run", str(task), "--agent-command", agent, "--sessions", "3"]) == 0
+    printed = capsys.readouterr().out
+    assert "| shorter | score | 3 | 3 | s000 -23.000 | -17.000 | +6.000 | s003 |" in printed
+    with pytest.raises(SystemExit, match="already has a config.yaml"):
+        main(["run", str(task), "--sessions", "5"])
+    assert main(["run", str(task), "--name", "second", "--agent-command", agent, "--sessions", "1"]) == 0
+    assert (task / "runs" / "second" / "tasks" / "shorter" / "sessions" / "s001" / "node.json").is_file()
+
+
+def test_named_agents_become_command_lines():
+    from infinievolve.local import agent_command
+    command, shell = agent_command({"spec": "claude/some-model:high"})
+    assert not shell and command[:6] == ["claude", "-p", "--model", "some-model", "--effort", "high"]
+    command, shell = agent_command("codex/another")
+    assert not shell and command[:2] == ["codex", "exec"] and "another" in command and command[-1] == "-"
+    assert agent_command({"command": "my-agent --go"}) == ("my-agent --go", True)
+    for wrong in ("claude", "other/model", {}):
+        with pytest.raises(ValueError):
+            agent_command(wrong)
+
+
+def test_without_a_declared_gate_every_reported_check_must_pass():
+    open_gate = parse_declaration({"metrics": {"a": {}}})
+    assert open_gate.valid({"x": True, "y": True}) and open_gate.valid({}) and not open_gate.valid({"x": True, "y": False})
+    assert open_gate.failed({"x": True, "y": False}) == ["y"]
+    named = parse_declaration({"metrics": {"a": {}}, "gate": ["x"]})
+    assert named.valid({"x": True, "y": False}) and not named.valid({"y": True}) and named.failed({}) == ["x"]
+    assert parse_declaration({"metrics": {"a": {}}, "gate": []}).valid({"x": False})
+    assert parse_declaration(open_gate.to_dict()).gate is None
+
+
+def test_the_ranking_sentence_comes_from_the_declaration():
+    from infinievolve.core.prompt import ranking_text
+    assert ranking_text(parse_declaration({"metrics": {"size": {"direction": "min"}}})) == \
+        "by `size`, lower being better, among versions that pass every check."
+    full = parse_declaration({"metrics": {"rate": {}}, "gate": ["builds"], "confirm": {"samples": 2}})
+    assert ranking_text(full) == ("by `rate`, higher being better, among versions that pass `builds`. A new best is "
+                                  "scored 2 more time(s) and ranked by the median.")
+    assert ranking_text(parse_declaration({"metrics": {"rate": {}}, "gate": []})) == "by `rate`, higher being better."
+
+
+# -- finding adapters and recording their events ----------------------------------------------
+def test_an_adapter_file_in_a_package_can_import_its_neighbours(tmp_path):
+    from infinievolve.adapters import find_factory
+    package = tmp_path / "mine"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "helper.py").write_text("VALUE = 41\n")
+    (package / "adapter.py").write_text("from .helper import VALUE\n\ndef make(config):\n    return VALUE + 1\n")
+    (tmp_path / "single.py").write_text("def make(config):\n    return 7\n")
+    assert find_factory("mine/adapter.py:make", tmp_path)(None) == 42
+    assert find_factory("single.py:make", tmp_path)(None) == 7
+    assert find_factory(str(package / "adapter.py") + ":make")(None) == 42      # an absolute path too
+    with pytest.raises(ValueError, match="not found"):
+        find_factory("missing.py:make", tmp_path)
+
+
+def test_an_adapter_may_record_events_of_its_own(tmp_path):
+    from infinievolve.core.events import EventLog
+    log = EventLog(tmp_path / "events.jsonl").for_task("t")
+    log.emit("job_held", "s001", reason="memory")
+    log.emit("adapter_image_pulled", "s001", seconds=3)
+    with pytest.raises(ValueError, match="adapter_"):
+        log.emit("made_up", "s001")
+    assert [event["type"] for event in log.read()] == ["job_held", "adapter_image_pulled"]
+
+
+def test_check_says_what_a_run_would_do_and_starts_nothing(tmp_path, capsys):
+    task = tmp_path / "golf"
+    shutil.copytree(REPOSITORY / "examples" / "golf", task, ignore=shutil.ignore_patterns("__pycache__", "runs"))
+    assert main(["check", str(task), "--prompt", "--sessions", "4"]) == 0
+    printed = capsys.readouterr().out
+    assert "ranked by    bytes (lower is better; absolute; the best-so-far curve starts at: baseline)" in printed
+    assert "valid when   every check the evaluator reports" in printed
+    assert "sessions     at most 4; stops earlier when the last 3 bring no gain above 0" in printed
+    assert "You are shortening the program described below." in printed and "## Task" in printed
+    assert not (task / "runs").exists()

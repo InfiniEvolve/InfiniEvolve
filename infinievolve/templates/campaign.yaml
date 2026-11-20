@@ -1,11 +1,13 @@
 # A campaign is a directory: its name is the directory name, this file is its only configuration, and
 # everything it produces stays beside it.
+#   infinievolve check <this directory> --prompt     what it would do and the first prompt; starts nothing
 #   infinievolve run <this directory>
+# A config often names hosts, paths and credential files: think before putting it in a public repository.
 
 campaign:
   # Which adapter runs the tasks: a registered name, an entry point of `infinievolve.adapters`,
   # `package.module:Name`, or `path/to/file.py:Name` (relative to this directory or the current one).
-  adapter: your_package.adapter:YourAdapter
+  adapter: local                  # the built-in adapter: task directories under options.tasks_dir
   tasks:                          # task names the adapter knows, or: tasks: all
     - your-task
   max_parallel: 4                 # jobs in flight across all tasks
@@ -14,10 +16,9 @@ campaign:
   # Default: each task's own limit, as the adapter gives it.
   # session_minutes: 120
 
-# Free-form: the framework records these on every node and hands them to the adapter.
-agent:
-  program: your-agent
-  model: your-model
+# The framework records this on every node and hands it to the adapter. For `local`:
+#   claude/<model>[:<effort>]   codex/<model>[:<effort>]   {command: "<shell command>"}
+agent: claude/your-model
 
 strategy:
   start: best                     # best | explore | baseline
@@ -27,6 +28,7 @@ strategy:
 stop:
   max_sessions: 12                # n
   window_k: 3                     # k: stop when the last k sessions ...
+                                  #    (k = max_sessions or more: never stop early)
   min_improvement: 0              # x: ... did not beat the best value by more than x
                                   #    (a percentage when the ranking metric is a ratio, an amount otherwise)
 
@@ -50,5 +52,6 @@ prompt:
 #   your-task:
 #     max_sessions: 6
 
-# Passed to the adapter as they are.
-options: {}
+# Passed to the adapter as they are. For `local`: where the task directories are, relative to this file.
+options:
+  tasks_dir: tasks

@@ -227,3 +227,56 @@ def test_other_start_strategies(tmp_path, strategy):
     else:
         draws = [event["data"]["draw"] for event in events(store, "selection")]
         assert all(0 <= draw < 1 for draw in draws[1:])
+
+
+def test_copies_of_one_piece_of_work_share_what_was_measured(tmp_path):
+    values = {"a": [1.0, {"value": 3.0, "work": b"same"}, {"value": 3.9, "work": b"same"}, 2.0]}
+    store, config = campaign(tmp_path, values, stop={"max_sessions": 3}, rescore={"a": [3.0, 3.2]},
+                             evaluation={"confirm": {"samples": 2, "aggregate": "median"}})
+    state, adapter = run(store, config)
+    archived = nodes(store)
+    # s001 was a new best and scored twice more: 3.0, 3.0, 3.2. s002 is the same work, measured once more at 3.9.
+    assert "duplicate" in archived["s002"].flags and adapter.rescored == {"a": 2}
+    assert archived["s001"].rank_value == archived["s002"].rank_value == 3.1     # the median of all four
+    assert archived["s002"].chosen()["metrics"]["score"] == 3.9                    # what it measured is kept
+    assert archived["s002"].chosen()["extra"]["pooled"]["nodes"] == ["s001", "s002"]
+    assert state["tasks"]["a"]["best"] == 3.1 and state["tasks"]["a"]["best_session"] == "s001"
+
+
+def test_a_measurement_the_adapter_does_not_trust_is_taken_again(tmp_path, monkeypatch):
+    original = fake_adapter.FakeAdapter._result
+
+    def distrusting(self, entry, default_work):
+        result = original(self, entry, default_work)
+        result.remeasure = entry.get("remeasure") if isinstance(entry, dict) else None
+        return result
+
+    monkeypatch.setattr(fake_adapter.FakeAdapter, "_result", distrusting)
+    values = {"a": [5.0, {"value": 0.2, "remeasure": "the machine was busy"}, 4.0]}     # 0.2 is nowhere near a best
+    store, config = campaign(tmp_path, values, stop={"max_sessions": 2}, rescore={"a": [3.0, 3.4]})
+    _, adapter = run(store, config)
+    node = nodes(store)["s001"]
+    assert adapter.rescored == {"a": 2} and node.rank_value == 3.0                      # the median of 0.2, 3.0, 3.4
+    assert "the machine was busy" in node.chosen()["extra"]["confirmation"]["reason"]
+
+
+def test_without_a_valid_baseline_the_first_valid_session_is_the_reference(tmp_path):
+    from infinievolve.core.views import matrix_rows, summary_rows
+    stub = {"value": None, "checks": {"ok": False}}                       # the task starts from nothing
+    values = {"a": [stub, stub, 2.0, 3.0, {"value": 4.0, "flags": {"cheated": "read the answers"}}, 3.0]}
+    store, config = campaign(tmp_path, values, stop={"max_sessions": 5, "window_k": 9})
+    _, adapter = run(store, config)
+    rows = {row["session"]: row for row in matrix_rows(store.task("a"))}
+    assert {row["reference"] for row in rows.values()} == {"s002"}
+    assert rows["s003"]["vs_reference_text"] == "1.50x" and rows["s001"]["vs_reference_text"] == "-"
+    assert summary_rows(store, ["a"])[0]["reference_text"] == "s002 2.000"
+    by_session = {spec.session_id: spec for spec in adapter.submitted}
+    inputs = tmp_path / "tasks" / "a" / "sessions"
+    assert not list((inputs / "s002" / "input").glob("reference.*"))          # nothing ranked yet
+    assert (inputs / "s004" / "input" / "reference.txt").read_bytes() == b"work of s002\n"
+    assert "with **s002**, the first valid one, as the reference." in by_session["s004"].prompt
+    # a reference that turns out not to be trustworthy hands over to the next valid session
+    from infinievolve.cli import main
+    (tmp_path / "config.yaml").write_text("campaign: {adapter: fake, tasks: all}\noptions: {values: {a: []}}\n")
+    assert main(["flag", str(tmp_path), "--task", "a", "--session", "s002", "--flag", "wrong", "--reason", "x"]) == 0
+    assert {row["reference"] for row in matrix_rows(store.task("a"))} == {"s003"}

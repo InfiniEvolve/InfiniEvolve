@@ -7,6 +7,6 @@ __pycache__/
 # a campaign keeps its config.yaml under version control; everything it produces stays local
 campaigns/*/*
 !campaigns/*/config.yaml
-examples/local/campaigns/*/*
-!examples/local/campaigns/*/config.yaml
+# what `infinievolve run <task directory>` produces
+runs/
 .env

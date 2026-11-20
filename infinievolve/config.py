@@ -4,8 +4,8 @@
                  tasks (a list, or "all"), max_parallel (jobs in flight across tasks), poll_seconds,
                  session_minutes (optional hard cap per agent session; default from each task),
                  name (optional; must equal the directory name)
-    agent:       free-form settings of the agent (which program, which model, ...). The framework records
-                 them on every node and hands them to the adapter; it reads none of them itself.
+    agent:       settings of the agent, free-form: a mapping, or one string (kept as {spec: <string>}). The
+                 framework records them on every node and hands them to the adapter; it reads none itself.
     strategy:    start (best | explore | baseline), seed, sharpness (explore only)
     stop:        max_sessions (n), window_k (k), min_improvement (x: a percentage when the ranking metric
                  is a ratio, an amount when it is absolute)
@@ -117,7 +117,8 @@ def parse_config(data: dict, name: str | None = None, root: Path | None = None) 
         report_chars=int(prompt.get("report_chars", 4000)), carry=str(prompt.get("carry", "full")),
         hide_scores=bool(prompt.get("hide_scores", False)),
         prompt_rules=tuple(str(rule) for rule in prompt.get("rules") or ()),
-        evaluation=dict(data.get("evaluation") or {}), agent=dict(data.get("agent") or {}))
+        evaluation=dict(data.get("evaluation") or {}),
+        agent={"spec": data["agent"]} if isinstance(data.get("agent"), str) else dict(data.get("agent") or {}))
     check_settings(defaults, "")
     overrides = {}
     for task, values in (data.get("task_overrides") or {}).items():

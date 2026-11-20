@@ -46,8 +46,8 @@ class HostFault(JobFailed):
 
 @dataclass(frozen=True)
 class PromptText:
-    """The task-specific sentences of the session prompt. Only `ranking` has no default."""
-    ranking: str                 # how sessions are compared, and on what the measurement is taken
+    """The task-specific sentences of the session prompt. Every one has a default."""
+    ranking: str = ""            # how sessions are compared and on what it is measured ("": said from the declaration)
     goal: str = "You are working on the task below."
     working: str = "Do your work in the directory you are started in."   # how to leave it to be captured
     feedback: str = ""           # how to check work during the session, if the task offers a way

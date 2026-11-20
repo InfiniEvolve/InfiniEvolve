@@ -10,7 +10,9 @@ TYPES = ("campaign_init", "campaign_stop", "campaign_hold", "task_reset", "task_
          "declaration_pinned", "declaration_mismatch", "baseline_scored", "selection", "prompt_rendered",
          "job_submitted", "job_started", "job_finished", "collected", "archived", "stop_check", "error",
          "poll_recovered", "agent_unavailable", "host_fault", "flagged", "flags_cleared",
-         "confirmation_needed", "confirmation_sample", "rescored")
+         "confirmation_needed", "confirmation_sample", "rescored", "job_held", "host_excluded")
+# An adapter may also record events of its own under any name with this prefix.
+ADAPTER_PREFIX = "adapter_"
 
 
 def now() -> str:
@@ -30,8 +32,9 @@ class EventLog:
         return EventLog(self.path, task)
 
     def emit(self, kind: str, session_id: str | None = None, **data) -> dict:
-        if kind not in TYPES:
-            raise ValueError(f"unknown event type {kind}")
+        if kind not in TYPES and not kind.startswith(ADAPTER_PREFIX):
+            raise ValueError(f"unknown event type {kind}: use one of the framework's, or a name starting "
+                             f"with {ADAPTER_PREFIX!r}")
         event = {"ts": now(), "type": kind, "task": self.task, "session_id": session_id, "data": data}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as stream:

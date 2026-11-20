@@ -1,0 +1,300 @@
+<title>InfiniEvolve 操作流程</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Patrick+Hand&family=LXGW+WenKai+TC&display=swap">
+<style>
+/* Layout: one figure, four steps down a numbered rail. Each step: its command, a line of what it is for,
+   and what you actually see or write at that point (files, terminal output, the loop, the result table). */
+:root {
+  --bg: #f4f6f8; --paper: #ffffff; --code: #f8fafc; --ink: #1b2530; --ink-2: #4b5a6b; --ink-3: #8593a3; --rule: #d2d9e1;
+  --accent: #2b6cb0; --accent-soft: #e4eef8; --str: #a6541a; --kw: #6b4fbb; --num: #1f7a5c; --mark: #c8741c; --mark-soft: #fbeedd;
+  --sans: "IBM Plex Sans", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --serif: "Source Serif 4", "Songti SC", "Noto Serif SC", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --hand: "Patrick Hand", "Kaiti SC", "STKaiti", "KaiTi", "LXGW WenKai TC", cursive;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --paper: #161e27; --code: #111920; --ink: #e6ebf0; --ink-2: #a9b5c2; --ink-3: #71808e; --rule: #2b3743;
+    --accent: #7db4ea; --accent-soft: #1a2c40; --str: #e3a66f; --kw: #b49cf2; --num: #6fcfa9; --mark: #e7a65a; --mark-soft: #3a2a17;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --paper: #161e27; --code: #111920; --ink: #e6ebf0; --ink-2: #a9b5c2; --ink-3: #71808e; --rule: #2b3743;
+  --accent: #7db4ea; --accent-soft: #1a2c40; --str: #e3a66f; --kw: #b49cf2; --num: #6fcfa9; --mark: #e7a65a; --mark-soft: #3a2a17;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45; }
+.page { max-width: 1000px; margin: 0 auto; padding-block: 20px 36px;
+        padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.bar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+h1 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 0; text-wrap: balance; }
+.switch { display: flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; flex: none; }
+.switch button { font: 500 12px var(--sans); border: 0; background: var(--paper); color: var(--ink-2); padding: 4px 10px; cursor: pointer; }
+.switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+figure { margin: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 16px 12px; }
+
+/* the rail */
+.step { display: grid; grid-template-columns: 42px minmax(0, 1fr); column-gap: 10px; position: relative; padding-bottom: 20px; }
+/* the rail between steps: a pencilled dashed line ending in a small arrowhead */
+.step::before { content: ""; position: absolute; left: 20px; top: 46px; bottom: 8px; border-left: 2px dashed var(--ink-3); transform: rotate(0.6deg); transform-origin: top; }
+.step::after { content: ""; position: absolute; left: 15px; bottom: 6px; width: 9px; height: 9px; border-right: 2px solid var(--ink-3);
+               border-bottom: 2px solid var(--ink-3); transform: rotate(48deg); border-radius: 1px; }
+.step:last-of-type::after { display: none; }
+.step:last-of-type { padding-bottom: 4px; }
+.step:last-of-type::before { display: none; }
+/* step numbers: drawn by hand, a circle that does not quite close, pencilled twice */
+.dot { position: relative; width: 42px; height: 42px; font: 400 25px/41px var(--hand); text-align: center; color: var(--accent); transform: rotate(-3deg); }
+.dot::before, .dot::after { content: ""; position: absolute; inset: 1px; border: 2px solid var(--accent);
+                            border-radius: 47% 53% 56% 44% / 54% 45% 55% 46%; }
+.dot::after { inset: 3px 0 0 2px; border-width: 1.5px; opacity: 0.45; border-radius: 55% 45% 48% 52% / 46% 56% 44% 54%; transform: rotate(14deg); }
+.step:nth-of-type(even) .dot { transform: rotate(5deg); }
+.body { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; align-content: center; }
+.head { min-height: 42px; }
+.head h2 { font: 400 23px/1.15 var(--hand); margin: 0; letter-spacing: 0.02em; text-decoration: underline wavy var(--mark);
+           text-decoration-thickness: 1.5px; text-underline-offset: 6px; padding-bottom: 6px; }
+:root:not(.lang-en) .head h2 { font-size: 22px; }
+/* a note in the margin, as one would pencil it beside a figure */
+.jot { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font: 400 17px/1.15 var(--hand); color: var(--mark);
+       transform: rotate(-1.5deg); white-space: nowrap; }
+:root:not(.lang-en) .jot { font-size: 16px; }
+.jot svg { width: 26px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 780px) { .jot { margin-left: 0; } }
+.head code { font: 500 12.5px var(--mono); background: var(--accent-soft); color: var(--accent); border-radius: 5px; padding: 3px 8px;
+             overflow-x: auto; white-space: nowrap; max-width: 100%; }
+.why { margin: 0; color: var(--ink-2); font-size: 13px; }
+.cols { display: grid; gap: 10px; min-width: 0; }
+.c3 { grid-template-columns: minmax(0, 190px) minmax(0, 1fr) minmax(0, 1fr); }
+.c2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.c2w { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+@media (max-width: 780px) { .c3, .c2, .c2w { grid-template-columns: minmax(0, 1fr); } }
+.card { border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; min-width: 0; display: flex; flex-direction: column; background: var(--code); }
+.card > header { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--rule); background: var(--paper); }
+.card > header b { font: 500 12.5px var(--mono); }
+.card > header span { color: var(--ink-3); font-size: 12px; margin-left: auto; text-align: right; }
+pre { margin: 0; padding: 8px 10px; font: 400 12px/1.55 var(--mono); color: var(--ink); overflow-x: auto; min-width: 0; }
+.c { color: var(--ink-3); font-style: italic; } .k { color: var(--accent); } .s { color: var(--str); } .w { color: var(--kw); } .n { color: var(--num); }
+.dim { color: var(--ink-3); } .hi { color: var(--mark); font-weight: 500; }
+.tree { padding: 9px 10px; display: flex; flex-direction: column; gap: 0; background: var(--paper); flex: 1; }
+.tree .root { font: 500 13px var(--mono); padding-bottom: 5px; }
+.tree ol { list-style: none; margin: 0; padding: 0 0 0 8px; border-left: 1.5px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
+.tree li { position: relative; padding-left: 14px; display: flex; flex-direction: column; }
+.tree li::before { content: ""; position: absolute; left: 0; top: 10px; width: 10px; border-top: 1.5px solid var(--rule); }
+.tree .name { font: 500 12.5px var(--mono); }
+.tree .what { color: var(--ink-2); font-size: 12px; }
+.plain { background: var(--paper); padding: 8px 10px; flex: 1; display: flex; align-items: center; }
+.plain svg { flex: 1; }
+.card > pre { flex: 1; }
+.plain svg { display: block; width: 100%; height: auto; }
+table { border-collapse: collapse; font: 400 12px var(--mono); width: 100%; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+th { font: 500 11px var(--sans); color: var(--ink-3); text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+td { text-align: right; padding: 3px 8px; white-space: nowrap; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+tr.best td { background: var(--mark-soft); } tr.best td:nth-child(3) { color: var(--mark); font-weight: 500; }
+tr.dup td { color: var(--ink-3); }
+.out { margin: 0; padding: 8px 10px; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--ink-2); background: var(--paper); flex: 1; }
+.out code { font: 400 11.5px var(--mono); color: var(--ink); }
+figcaption { font-family: var(--serif); font-size: 13.5px; line-height: 1.5; color: var(--ink-2); border-top: 1px solid var(--rule); padding-top: 10px; margin-top: 4px; }
+figcaption b { color: var(--ink); font-weight: 600; }
+figcaption code { font: 400 12px var(--mono); color: var(--ink); }
+.en { display: none; }
+:root.lang-en .en { display: revert; }
+:root.lang-en .zh { display: none; }
+
+svg text { font-family: var(--sans); fill: var(--ink); }
+svg .t2 { fill: var(--ink-2); } svg .t3 { fill: var(--ink-3); }
+.ring { fill: none; stroke: var(--rule); stroke-width: 1.5; }
+.arrow { fill: var(--ink-3); }
+.node { fill: var(--paper); stroke: var(--ink-2); stroke-width: 1.1; }
+.node-a { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+.num { font-family: var(--mono); font-size: 10.5px; fill: var(--accent); }
+.bot { stroke: var(--accent); stroke-width: 1.3; fill: var(--paper); stroke-linejoin: round; stroke-linecap: round; }
+</style>
+
+<div class="page">
+  <div class="bar">
+    <h1><span class="zh">InfiniEvolve 的操作流程</span><span class="en">Using InfiniEvolve, start to finish</span></h1>
+    <div class="switch" role="group" aria-label="Language">
+      <button id="lang-zh" type="button" aria-pressed="true">中文</button>
+      <button id="lang-en" type="button" aria-pressed="false">EN</button>
+    </div>
+  </div>
+
+  <figure>
+    <!-- 1 -->
+    <div class="step">
+      <div class="dot">1</div>
+      <div class="body">
+        <div class="head"><h2><span class="zh">准备任务</span><span class="en">Set up a task</span></h2><code>infinievolve init mytask</code>
+          <span class="jot"><svg viewBox="0 0 26 18" aria-hidden="true"><path d="M24 3 C16 2 8 6 4 14"/><path d="M3 7 L4 14 L10 12"/></svg><span class="zh">只需要填这三样</span><span class="en">just these three</span></span></div>
+        <p class="why"><span class="zh">生成任务目录。你要填的只有三样：起始文件、任务说明、打分办法。</span>
+          <span class="en">Creates the task directory. Three things are yours to fill in: the starting files, the task, a way to score.</span></p>
+        <div class="cols c3">
+          <div class="card"><div class="tree">
+            <div class="root">mytask/</div>
+            <ol>
+              <li><span class="name">workspace/</span><span class="what"><span class="zh">放起始文件</span><span class="en">the starting files</span></span></li>
+              <li><span class="name">task.yaml</span><span class="what"><span class="zh">做什么、怎么打分、按什么排名</span><span class="en">what to do, how to score, what ranks</span></span></li>
+              <li><span class="name">evaluate.py</span><span class="what"><span class="zh">给一个版本打分</span><span class="en">scores one version</span></span></li>
+            </ol>
+          </div></div>
+          <div class="card">
+            <header><b>task.yaml</b><span><span class="zh">三项</span><span class="en">three settings</span></span></header>
+<pre><span class="c"># What the agent is asked to do.</span>
+<span class="k">instruction</span>: |
+  <span class="s">Describe the task here.</span>
+
+<span class="c"># How one version is scored.</span>
+<span class="k">evaluate</span>: <span class="s">python3 "$EVOLVE_TASK/evaluate.py"</span>
+
+<span class="c"># The number that ranks sessions.</span>
+<span class="k">metric</span>: {<span class="k">name</span>: <span class="s">score</span>, <span class="k">direction</span>: <span class="s">max</span>}</pre>
+          </div>
+          <div class="card">
+            <header><b>evaluate.py</b><span><span class="zh">最后一行打印 JSON</span><span class="en">prints one JSON line</span></span></header>
+<pre><span class="s">"""Scores one version of the work."""</span>
+<span class="w">import</span> json
+
+checks = {<span class="s">"ok"</span>: <span class="w">True</span>}
+metrics = {<span class="s">"score"</span>: <span class="n">0.0</span>}   <span class="c"># TODO: measure</span>
+
+<span class="w">print</span>(json.dumps({<span class="s">"checks"</span>: checks,
+                  <span class="s">"metrics"</span>: metrics}))</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="step">
+      <div class="dot">2</div>
+      <div class="body">
+        <div class="head"><h2><span class="zh">预览</span><span class="en">Preview</span></h2><code>infinievolve check mytask --prompt</code>
+          <span class="jot"><svg viewBox="0 0 26 18" aria-hidden="true"><path d="M24 3 C16 2 8 6 4 14"/><path d="M3 7 L4 14 L10 12"/></svg><span class="zh">先预览，再启动</span><span class="en">preview, then start</span></span></div>
+        <p class="why"><span class="zh">不启动任何作业，也不调用 agent：确认它会怎么排名、什么算有效、何时停止，并打印 agent 将收到的第一条提示词。</span>
+          <span class="en">Starts no job and calls no agent: how it will rank, what counts as valid, when it stops, and the first prompt the agent will get.</span></p>
+        <div class="card">
+<pre>mytask
+  <span class="k">ranked by</span>    score (higher is better; absolute; the best-so-far curve starts at: baseline)
+  <span class="k">valid when</span>   every check the evaluator reports
+  <span class="k">sessions</span>     at most 6; stops earlier when the last 3 bring no gain above 0
+  <span class="k">start</span>        best; inherits: full; limit 60 min per session
+<span class="dim">----- first prompt of mytask -----</span>
+<span class="dim">You are working on the task below. When you end this session, what you leave behind is evaluated ...</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="step">
+      <div class="dot">3</div>
+      <div class="body">
+        <div class="head"><h2><span class="zh">运行</span><span class="en">Run</span></h2><code>infinievolve run mytask --agent claude/&lt;model&gt; --sessions 6</code>
+          <span class="jot"><svg viewBox="0 0 26 18" aria-hidden="true"><path d="M24 3 C16 2 8 6 4 14"/><path d="M3 7 L4 14 L10 12"/></svg><span class="zh">随时能停，再跑会接上</span><span class="en">stop anytime, it resumes</span></span></div>
+        <p class="why"><span class="zh">先给起始文件打分，然后一轮一轮地跑。可以随时中断，再执行同一条命令会接着跑。</span>
+          <span class="en">Scores the starting files, then runs round after round. Interrupt it whenever you like; the same command picks up where it stopped.</span></p>
+        <div class="cols c2w">
+          <div class="card">
+            <header><b><span class="zh">终端输出</span><span class="en">what it prints</span></b><span><span class="zh">每归档一轮一行</span><span class="en">a line per archived round</span></span></header>
+<pre>[mytask/s000] archived final: score 0.41 (valid); best so far 0.41
+[mytask/s001] submitted, start from s000 (best); limit 60 min
+[mytask/s001] archived final: score 0.58 (valid); best so far 0.58
+[mytask/s002] submitted, start from s001 (best); limit 60 min
+<span class="dim">...</span>
+[mytask] stop: reached max_sessions=6</pre>
+          </div>
+          <div class="card"><div class="plain">
+            <svg viewBox="0 0 420 176" role="img" aria-label="Each round: select a start, build the prompt, agent session, evaluate, archive">
+              <ellipse class="ring" cx="210" cy="84" rx="150" ry="56"/>
+              <g class="arrow">
+                <path d="M-5,-3.5 L5,0 L-5,3.5 Z" transform="translate(298.2,38.7) rotate(15)"/>
+                <path d="M-5,-3.5 L5,0 L-5,3.5 Z" transform="translate(352.7,101.3) rotate(131)"/>
+                <path d="M-5,-3.5 L5,0 L-5,3.5 Z" transform="translate(210,140) rotate(180)"/>
+                <path d="M-5,-3.5 L5,0 L-5,3.5 Z" transform="translate(67.3,101.3) rotate(229)"/>
+                <path d="M-5,-3.5 L5,0 L-5,3.5 Z" transform="translate(121.8,38.7) rotate(-15)"/>
+              </g>
+              <g font-size="11.5">
+                <rect class="node" x="154" y="14" width="112" height="28" rx="14"/><text class="num" x="166" y="32">1</text>
+                <text x="178" y="32.5"><tspan class="zh">选起点</tspan><tspan class="en">Select a start</tspan></text>
+                <rect class="node" x="298" y="52" width="116" height="28" rx="14"/><text class="num" x="310" y="70">2</text>
+                <text x="322" y="70.5"><tspan class="zh">生成提示词</tspan><tspan class="en">Build prompt</tspan></text>
+                <rect class="node-a" x="232" y="116" width="140" height="28" rx="14"/><text class="num" x="244" y="134">3</text>
+                <text x="256" y="134.5"><tspan class="zh">agent 会话</tspan><tspan class="en">Agent session</tspan></text>
+                <rect class="node" x="64" y="116" width="112" height="28" rx="14"/><text class="num" x="76" y="134">4</text>
+                <text x="88" y="134.5"><tspan class="zh">评估</tspan><tspan class="en">Evaluate</tspan></text>
+                <rect class="node" x="6" y="52" width="112" height="28" rx="14"/><text class="num" x="18" y="70">5</text>
+                <text x="30" y="70.5"><tspan class="zh">归档</tspan><tspan class="en">Archive</tspan></text>
+              </g>
+              <g class="bot" transform="translate(348,122)">
+                <line x1="8" y1="2" x2="8" y2="-2"/><rect x="0" y="2" width="16" height="12" rx="3.5"/>
+                <circle cx="5" cy="8" r="1.4"/><circle cx="11" cy="8" r="1.4"/>
+              </g>
+              <text x="210" y="82" text-anchor="middle" font-size="12" font-weight="600"><tspan class="zh">每一轮</tspan><tspan class="en">each round</tspan></text>
+              <text class="t2" x="210" y="98" text-anchor="middle" font-size="11"><tspan class="zh">从已归档的最好版本出发</tspan><tspan class="en">starts from the best archived version</tspan></text>
+              <text class="t3" x="210" y="170" text-anchor="middle" font-size="11"><tspan class="zh">到会话上限，或最近几轮没有提升时停止</tspan><tspan class="en">stops at the limit, or when rounds stop helping</tspan></text>
+            </svg>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="step">
+      <div class="dot">4</div>
+      <div class="body">
+        <div class="head"><h2><span class="zh">读结果</span><span class="en">Read the results</span></h2><code>infinievolve report mytask --task mytask</code>
+          <span class="jot"><svg viewBox="0 0 26 18" aria-hidden="true"><path d="M24 3 C16 2 8 6 4 14"/><path d="M3 7 L4 14 L10 12"/></svg><span class="zh">最好的版本在这里</span><span class="en">the best one is here</span></span></div>
+        <p class="why"><span class="zh">每一轮的得分、相对起点的提升和最好成绩；所有内容都留在任务目录的 <code style="font:400 12px var(--mono)">runs/</code> 下。</span>
+          <span class="en">Every round's score, its gain over the start and the best so far; everything stays under <code style="font:400 12px var(--mono)">runs/</code> in the task directory.</span></p>
+        <div class="cols c2w">
+          <div class="card">
+            <header><b><span class="zh">会话矩阵</span><span class="en">session matrix</span></b><span><span class="zh">示例</span><span class="en">example</span></span></header>
+            <div class="scroll"><table>
+              <thead><tr><th>session</th><th>parent</th><th>score</th><th>vs reference</th><th>best so far</th><th>flags</th></tr></thead>
+              <tbody>
+                <tr><td>s000</td><td>-</td><td>0.41</td><td>+0.00</td><td>0.41</td><td>-</td></tr>
+                <tr><td>s001</td><td>s000</td><td>0.58</td><td>+0.17</td><td>0.58</td><td>-</td></tr>
+                <tr><td>s002</td><td>s001</td><td>0.55</td><td>+0.14</td><td>0.58</td><td>-</td></tr>
+                <tr class="best"><td>s003</td><td>s001</td><td>0.73</td><td>+0.32</td><td>0.73</td><td>-</td></tr>
+                <tr class="dup"><td>s004</td><td>s003</td><td>0.73</td><td>+0.32</td><td>0.73</td><td>duplicate</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <div class="card">
+            <header><b>mytask/runs/default/</b><span><span class="zh">产出</span><span class="en">what is kept</span></span></header>
+            <ul class="out">
+              <li><span class="zh">最好的成果：</span><span class="en">The best work: </span><code>tasks/mytask/archive/artifacts/s003.patch</code></li>
+              <li><span class="zh">每轮的提示词、报告、完整记录：</span><span class="en">Each round's prompt, report and full record: </span><code>tasks/mytask/sessions/&lt;sid&gt;/</code></li>
+              <li><span class="zh">谱系图和表格：</span><span class="en">Lineage and tables: </span><code>infinievolve export mytask</code></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <figcaption>
+      <span class="zh"><b>图 1.</b> 从零到结果的四步。<b>1</b> 用 <code>init</code> 生成任务目录并填好三样内容；<b>2</b> 用 <code>check</code> 在运行之前确认设置；<b>3</b> 用 <code>run</code> 启动循环，每一轮从已归档的最好版本出发；<b>4</b> 用 <code>report</code> 查看每一轮的结果并取回最好的成果。第 3、4 步的输出为示意，数值是举例。</span>
+      <span class="en"><b>Figure 1.</b> Four steps from nothing to a result. <b>1</b> <code>init</code> creates the task directory, and you fill in three things; <b>2</b> <code>check</code> confirms the settings before anything runs; <b>3</b> <code>run</code> starts the loop, each round beginning from the best archived version; <b>4</b> <code>report</code> shows every round and where the best work is. The output shown in steps 3 and 4 is illustrative; the numbers are made up.</span>
+    </figcaption>
+  </figure>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement, zh = document.getElementById('lang-zh'), en = document.getElementById('lang-en');
+  function set(lang) {
+    root.classList.toggle('lang-en', lang === 'en');
+    zh.setAttribute('aria-pressed', String(lang !== 'en'));
+    en.setAttribute('aria-pressed', String(lang === 'en'));
+    try { localStorage.setItem('ie-lang', lang); } catch (error) {}
+  }
+  zh.addEventListener('click', function () { set('zh'); });
+  en.addEventListener('click', function () { set('en'); });
+  var saved = null;
+  try { saved = localStorage.getItem('ie-lang'); } catch (error) {}
+  if (saved === 'en') { set('en'); }
+})();
+</script>

@@ -89,6 +89,7 @@ class SessionResult:
     stats: dict = field(default_factory=dict)     # anything else worth keeping per session
     flags: dict = field(default_factory=dict)
     error: str | None = None
+    remeasure: str | None = None                  # why this measurement should be taken again, if it should
 
 
 @dataclass

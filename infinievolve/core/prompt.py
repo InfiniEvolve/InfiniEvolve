@@ -13,7 +13,7 @@ from ..artifacts import ArtifactKind, artifact_kind
 from .adapter import PromptText
 from .archive import TaskStore
 from .schema import Declaration
-from .selection import best_node
+from .selection import best_node, reference_node
 from .types import Node
 
 REPORT_BEGIN, REPORT_END = "SESSION-REPORT-BEGIN", "SESSION-REPORT-END"
@@ -80,18 +80,21 @@ def metric_value(node: Node, name: str):
 
 
 def failures(node: Node, declaration: Declaration) -> str:
-    """Why versions of this node failed: the evaluator's reasons, else the names of the failed checks."""
+    """Why versions of this node failed: the evaluator's reasons, else the names of the failed checks.
+    Nothing for a valid node: what an evaluator remarks about valid work is not a failure."""
+    if node.valid:
+        return ""
     reasons = sorted({str(reason) for row in node.scores for reason in (row.get("reasons") or [])})
     if reasons:
         return ", ".join(reasons)
     row = node.chosen() or (node.scores[-1] if node.scores else {})
-    failed = [name for name in declaration.gate if (row.get("checks") or {}).get(name) is not True]
-    return ", ".join(failed) if not node.valid and failed else ""
+    failed = declaration.failed(row.get("checks"))
+    return ", ".join(failed)
 
 
 # -- what the agent reads about earlier sessions ---------------------------------------------
 NO_BASELINE = ("The unmodified baseline does not pass the task's checks, so it has no value to compare "
-               "with; sessions are compared with each other.")
+               "with; sessions are compared with each other")
 WITHHELD = "score withheld"
 HIDDEN = ("Scores of earlier sessions are withheld: this task is scored on something its sessions must not "
           "learn from, so a score is not feedback for later sessions. The framework still uses it to choose "
@@ -123,7 +126,9 @@ def summary_table(nodes: list[Node], declaration: Declaration, hidden: bool = Fa
                   f"({'higher' if declaration.rank.direction == 'max' else 'lower'} is better)."]
         root = next((node for node in nodes if node.is_root), None)
         if root is not None and not root.valid:
-            lines += ["", NO_BASELINE]
+            reference = reference_node(nodes, declaration.rank)
+            lines += ["", NO_BASELINE + (f", with **{reference.session_id}**, the first valid one, as the "
+                                         "reference." if reference else ".")]
     return "\n".join(lines)
 
 
@@ -217,6 +222,21 @@ def start_text(parent: Node | None, text: PromptText, anonymous: bool = False) -
             f"`{parent.chosen_label}`), already in place. {text.continuing}")
 
 
+def ranking_text(declaration: Declaration) -> str:
+    """How sessions are ranked, said from the declaration alone, for adapters that add nothing to it."""
+    metric = declaration.rank
+    text = f"by `{metric.name}`, {'higher' if metric.direction == 'max' else 'lower'} being better"
+    if declaration.gate is None:
+        text += ", among versions that pass every check"
+    elif declaration.gate:
+        text += ", among versions that pass " + ", ".join(f"`{name}`" for name in declaration.gate)
+    text += "."
+    if declaration.confirm:
+        text += (f" A new best is scored {declaration.confirm.samples} more time(s) and ranked by the "
+                 f"{declaration.confirm.aggregate}.")
+    return text
+
+
 def session_prompt(*, text: PromptText, instruction: str, declaration: Declaration, parent: Node | None,
                    nodes: list[Node], carry: str, report_chars: int, location: str, hidden: bool = False,
                    rules=()) -> str:
@@ -224,7 +244,7 @@ def session_prompt(*, text: PromptText, instruction: str, declaration: Declarati
     shows_archive = carry != "none" and archived(nodes)
     return render(
         template(),
-        goal=text.goal, working=text.working, ranking=text.ranking,
+        goal=text.goal, working=text.working, ranking=text.ranking or ranking_text(declaration),
         feedback=f"- {text.feedback}\n" if text.feedback else "",
         persistence=text.persistence,
         archive_intro=ARCHIVE_INTRO if shows_archive else "",

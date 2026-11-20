@@ -10,6 +10,7 @@
                                  until a session has one, or a fixed number
         format: "{:.3f}"         how the value is shown
     gate: [<check>, ...]         the evaluator's checks a version must all pass to be valid
+                                 (default: every check the evaluator reports; [] for none)
     rank_by: <metric>            the one metric that chooses starting points and feeds the stop rule
     show: [<metric>, ...]        the metrics later sessions and the tables show (default: rank_by)
     confirm:                     score a new best again before it is trusted (optional)
@@ -100,7 +101,7 @@ class Confirm:
 class Declaration:
     metrics: dict
     rank_by: str
-    gate: tuple = ()
+    gate: tuple | None = None       # None: every check the evaluator reports
     show: tuple = ()
     confirm: Confirm | None = None
     flags: dict | None = None
@@ -111,16 +112,30 @@ class Declaration:
     def rank(self) -> Metric:
         return self.metrics[self.rank_by]
 
+    def metric_names(self) -> list:
+        """Every declared metric, the ranking one first."""
+        return [self.rank_by] + sorted(name for name in self.metrics if name != self.rank_by)
+
     def valid(self, checks: dict) -> bool:
-        """A check the evaluator did not report counts as failed."""
-        return all((checks or {}).get(name) is True for name in self.gate)
+        """Whether a version with these checks passes the gate. A gated check the evaluator did not report
+        counts as failed; without a declared gate, every reported check must be true."""
+        checks = checks or {}
+        if self.gate is None:
+            return all(value is True for value in checks.values())
+        return all(checks.get(name) is True for name in self.gate)
+
+    def failed(self, checks: dict) -> list:
+        """The names of the checks that keep a version with these checks from being valid."""
+        checks = checks or {}
+        names = checks if self.gate is None else self.gate
+        return [name for name in names if checks.get(name) is not True]
 
     def flag_level(self, name: str) -> str:
         return (self.flags or {}).get(name, "hard")
 
     def to_dict(self) -> dict:
         return {"metrics": {name: metric.to_dict() for name, metric in self.metrics.items()},
-                "rank_by": self.rank_by, "gate": list(self.gate), "show": list(self.show),
+                "rank_by": self.rank_by, "gate": None if self.gate is None else list(self.gate), "show": list(self.show),
                 "confirm": ({"samples": self.confirm.samples, "aggregate": self.confirm.aggregate}
                             if self.confirm else None),
                 "flags": dict(self.flags or {}),
@@ -169,7 +184,7 @@ def parse_declaration(data: dict) -> Declaration:
     rank_by = data.get("rank_by") or (next(iter(metrics)) if len(metrics) == 1 else None)
     if rank_by not in metrics:
         raise ValueError(f"rank_by must name one of the declared metrics {sorted(metrics)}, got {rank_by!r}")
-    gate = tuple(str(name) for name in data.get("gate") or ())
+    gate = None if data.get("gate") is None else tuple(str(name) for name in data["gate"])
     show = tuple(str(name) for name in data.get("show") or (rank_by,))
     missing = [name for name in show if name not in metrics]
     if missing:

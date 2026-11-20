@@ -1,0 +1,25 @@
+# A toy task with nothing to do with speed: make a correct program as short as possible.
+#   infinievolve run examples/golf
+
+instruction: |
+  `solution.py` defines `is_prime(number)`, which must return a true value exactly for prime numbers.
+  It is checked on every integer from -5 to 100.
+
+  Make `solution.py` as short as you can, counted in bytes, without changing what `is_prime` returns.
+  `solution.py` must stay the only file.
+
+# Run in a clean copy of the work; prints the checks and metrics of that version as one JSON line.
+evaluate: python3 "$EVOLVE_TASK/evaluate.py"
+
+# The size is exact, so there is nothing to confirm; every check the evaluator reports must pass.
+metric: {name: bytes, direction: min, format: "{:.0f}"}
+
+time_limit_seconds: 600
+
+prompt:
+  goal: You are shortening the program described below.
+  feedback: To check a version yourself, import it and compare `is_prime` with a list of primes you trust.
+
+# A scripted stand-in, so the example runs without an account. Name a real agent to replace it:
+#   infinievolve run examples/golf --name real --agent claude/<model>
+agent: {command: 'python3 "$EVOLVE_TASK/fake_agent.py"'}

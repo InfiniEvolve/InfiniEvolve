@@ -10,133 +10,109 @@ The framework owns the loop and the archive. It does not know what a task is abo
 which way is better, what makes a result valid, what a session's work looks like and where an agent runs
 all come from outside it.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/workflow.dark.png">
+  <img src="docs/images/workflow.png" alt="The four steps of using InfiniEvolve: set up a task with init, preview with check, run, and read the results" width="820">
+</picture>
+
 ## Quick start
 
-Needs Python 3.10 or newer; the example also needs `git`.
+Needs Python 3.10 or newer, and `git`.
 
 ```sh
 git clone https://github.com/xiemeimeiaaa/InfiniEvolve.git && cd InfiniEvolve
 uv venv -p 3.11 .venv && uv pip install -p .venv -e .
 
-.venv/bin/infinievolve run examples/local/campaigns/demo
+.venv/bin/infinievolve run examples/golf
 ```
 
-The example task asks for a correct program that is as short as possible, and a scripted stand-in plays
-the agent, so it runs in a few seconds without any account. It prints each session as it is archived and
+[`examples/golf`](examples/golf) is a task directory: it asks for a correct program that is as short as
+possible, and a scripted stand-in plays the agent, so it runs in a few seconds without any account. It
 ends with the summary:
 
 ```
-[golf/s000] archived final: bytes 466 (valid); wall 0.0 min; best so far 466
-[golf/s001] submitted, start from s000 (best); limit 10 min
-[golf/s001] archived final: bytes 286 (valid); agent 0.0 min; wall 0.0 min; best so far 286
-...
-[golf] stop: best 163 within 0.0 of 163 over the last 2 sessions
-
-| task | ranked by | sessions | valid | baseline | best | best session | agent h | status |
-|---|---|---|---|---|---|---|---|---|
-| golf | bytes | 7 | 7 | 466 | 163 | s005 | 0.00 | best 163 within 0.0 of 163 over the last 2 sessions |
+| task | ranked by | sessions | valid | reference | best | vs reference | best session | agent h | status |
+|---|---|---|---|---|---|---|---|---|---|
+| golf | bytes | 8 | 8 | s000 466 | 163 | -303 | s005 | 0.00 | best 163 within 0.0 of 163 over the last 3 sessions |
 ```
 
 ## What you get
 
-Everything a campaign produces is in its own directory. The parts you will look at:
+Everything a run produces is in its own directory: `<task>/runs/<name>/` for a task directory, the
+campaign directory otherwise. Relative to it:
 
 | You want | Look at |
 |---|---|
 | how each task ended up | `summary.md` (also printed by `infinievolve report`) |
 | one task session by session: every metric, the best so far, flags | `tasks/<task>/archive/matrix.md` (`infinievolve report --task <task>`) |
-| the best work itself | `tasks/<task>/archive/artifacts/<best session>.patch`: a diff against the task's baseline, to apply with `git apply` |
+| the best work itself | `tasks/<task>/archive/artifacts/<best session>.patch`: a diff against the task's baseline, to apply with `git apply` in a copy of `workspace/` |
 | what a session was told | `tasks/<task>/sessions/<sid>/input/prompt.md` and `archive.md` |
 | what a session said it did and learned | `tasks/<task>/sessions/<sid>/derived/report.md` |
-| what the agent actually did | `tasks/<task>/sessions/<sid>/raw/`, whatever the adapter keeps (the example keeps the agent's output and the evaluator's result) |
+| what the agent actually did | `tasks/<task>/sessions/<sid>/raw/`, whatever the adapter keeps (the built-in one keeps the agent's output and the evaluator's result) |
 | why a starting point was chosen | `tasks/<task>/sessions/<sid>/input/selection.json` |
 | everything that happened, in order | `events.jsonl` |
 | tables and lineage graphs for analysis | `exports/` after `infinievolve export`: `nodes.csv`, `scores.csv`, `best_so_far.csv`, `<task>/lineage.{json,dot,mmd}` |
-
-The session matrix of the example:
-
-```
-| session | parent | start | scored | valid | bytes | best so far | flags | agent min | wall min | failed |
-|---|---|---|---|---|---|---|---|---|---|---|
-| s000 | - | root | final | yes | 466 | 466 | - | - | 0.0 | - |
-| s001 | s000 | best | final | yes | 286 | 286 | - | 0.0 | 0.0 | - |
-| s002 | s001 | best | final | yes | 228 | 228 | - | 0.0 | 0.0 | - |
-...
-| s005 | s004 | best | final | yes | 163 | 163 | - | 0.0 | 0.0 | - |
-| s006 | s005 | best | final | yes | 163 | 163 | duplicate (soft) | 0.0 | 0.0 | - |
-```
 
 Nothing is overwritten: every session keeps its inputs, its raw outputs and what was derived from them,
 with a checksum of every file, so a result can be traced back and a different analysis can be run later.
 
 ## Using it on your own task
 
-With the local adapter of the example you need no code beyond a script that scores a version.
+The four steps of the figure, to copy:
 
-1. **Copy `examples/local`** into your project. It holds the adapter, a task directory and a campaign.
-2. **Describe the task** in `tasks/<name>/`:
-   - `workspace/`: the baseline, that is, the files a session starts from;
-   - a program that scores one version. It is run in a clean copy of the work and prints, as its last
-     line, one JSON object: `{"checks": {"tests_pass": true}, "metrics": {"score": 0.82}, "reasons": []}`;
-   - `task.yaml`:
+```sh
+infinievolve init mytask                                      # then fill in workspace/, task.yaml, evaluate.py
+infinievolve check mytask --agent claude/<model> --prompt     # what it would do; starts nothing
+infinievolve run mytask --agent claude/<model> --sessions 6   # interrupt and rerun to resume
+infinievolve report mytask --task mytask
+```
 
-     ```yaml
-     instruction: |
-       What the agent is asked to do.
-     time_limit_seconds: 3600
-     evaluate: ["{python}", "{task}/evaluate.py"]     # {task} is this directory
-     declaration:
-       metrics:
-         score: {direction: max, scale: absolute, anchor: baseline}
-       gate: [tests_pass]
-       rank_by: score
-     prompt:
-       ranking: by `score`, higher being better, among versions that pass the tests.
-     ```
-3. **Point the campaign at your agent** in `campaigns/<name>/config.yaml`: set `tasks`, and set
-   `options.agent_command` to a shell command that starts your agent without interaction and hands it the
-   prompt. The command runs in a copy of the workspace with these set:
+What the figure leaves out:
 
-   | Variable | Is |
-   |---|---|
-   | `EVOLVE_PROMPT` | the path of the session prompt |
-   | `EVOLVE_ARCHIVE` | the path of the full archive of earlier sessions |
-   | `EVOLVE_WORKSPACE` | the working copy, also the current directory |
-   | `EVOLVE_CAMPAIGN` | the campaign directory |
+- **The evaluator** can be any program. It is run in a clean copy of one version of the work and prints,
+  as its last line, `{"checks": {...}, "metrics": {...}}`. A version counts only when every check is
+  true, and the metric named in `task.yaml` must be among the metrics.
+- **The agent** is one of:
 
-   Whatever the agent changes in that directory is its work, and whatever it prints is kept as the
-   transcript the closing report is read from.
-4. **Run it**: `infinievolve run campaigns/<name>`. It can be interrupted and run again.
+  | `--agent` | Runs |
+  |---|---|
+  | `claude/<model>[:<effort>]` | Claude Code, without interaction |
+  | `codex/<model>[:<effort>]` | Codex, without interaction |
+  | `--agent-command "<shell command>"` instead | anything else: the command gets the prompt on its standard input and in the file `$EVOLVE_PROMPT`, and runs in the working copy |
+- **Several runs** of one task sit side by side: `--name` starts another, with another agent or other
+  settings. Without it the run is `default`.
 
-An agent started this way edits files and runs commands without asking. Run it somewhere you would let
-it do that.
+**The agent is not confined.** The two named agents run with their permission checks bypassed: they edit
+files and run commands without asking, as you, and nothing keeps them inside the working copy. Run where
+you would let an agent do that.
 
-Write an adapter of your own (see below) when sessions must run somewhere else than this machine, when
-the work is not a set of file changes, or when you want to read the agent's usage, recognise a refused
-agent, or check what it did during a session.
+When you need more:
+
+| To | Do |
+|---|---|
+| record several metrics, gate on some checks only, score a new best again | write a `declaration` in `task.yaml` instead of `metric` ([What you declare](#what-you-declare)) |
+| reword the task-specific sentences of the prompt | add `prompt:` to `task.yaml` |
+| change the stop rule, what sessions inherit, or add rules for every session | edit `mytask/runs/<name>/config.yaml` |
+| run several tasks side by side | write a campaign config: `infinievolve new campaigns/first` |
+| run sessions on other machines, archive work that is not a set of file changes, read usage in your own way, check what an agent did | [write an adapter](docs/writing-an-adapter.md) |
 
 ## How it works
 
-Each task runs independently:
+Each task keeps one lineage. The unmodified baseline is scored first and becomes its root, `s000`; after
+that the loop of the figure repeats until `max_sessions` sessions have run, or the last `window_k` of
+them did not beat the best value by more than `min_improvement`.
 
-1. The unmodified baseline is scored once. It is the root of the lineage, `s000`.
-2. Then, repeatedly:
-   1. check the stop rule;
-   2. choose the node the next session starts from (`best`, `explore` or `baseline`);
-   3. write the session's prompt: the task, the starting point, a summary of the archive;
-   4. run one agent session, then evaluate what it left behind;
-   5. archive the result as a new node.
-3. The task stops after `max_sessions` sessions, or when the last `window_k` sessions did not beat the
-   best value by more than `min_improvement`.
-
-Sessions of one task run one after another, because each reads the archive of those before it. Different
-tasks run side by side, up to `max_parallel` jobs at once. A campaign can be interrupted at any point;
-running it again re-attaches to jobs that are still going and resubmits what was prepared but not started.
-
-The three ways to choose a starting point: `best` takes the valid node with the best ranking value;
-`explore` draws among all valid nodes, more often the better ones and less often those many sessions
-already started from, so a weaker node can still become a stepping stone; `baseline` always starts from
-the unmodified baseline and uses the archive as context only.
+- **Where a session starts.** `best` takes the valid node with the best ranking value; `explore` draws
+  among all valid nodes, more often the better ones and less often those many sessions already started
+  from, so a weaker node can still become a stepping stone; `baseline` always starts from the unmodified
+  baseline and uses the archive as context only.
+- **What it is compared with.** Every result is read against a reference: the baseline when it is valid,
+  and otherwise the first session that is. A task may start from nothing, and then the first working
+  version is the yardstick for the later ones.
+- **What runs when.** Sessions of one task run one after another, because each reads the archive of
+  those before it. Different tasks run side by side, up to `max_parallel` jobs at once.
+- **Interruptions.** A run can be stopped at any point; running it again re-attaches to jobs that are
+  still going and resubmits what was prepared but not started.
 
 ## What you declare
 
@@ -146,7 +122,7 @@ An adapter gives a declaration for each task, and a campaign may override parts 
 metrics:                          # every number the evaluator reports
   pass_rate: {direction: max, scale: absolute, anchor: baseline, format: "{:.1%}"}
   tokens:    {direction: min, scale: absolute}
-gate: [builds, tests_unchanged]   # the checks a version must all pass to be valid
+gate: [builds, tests_unchanged]   # the checks a version must pass to be valid (default: all it reports)
 rank_by: pass_rate                # the one metric that picks starting points and feeds the stop rule
 show: [pass_rate, tokens]         # what later sessions see
 confirm: {samples: 2, aggregate: median}   # score a new best again before trusting it (optional)
@@ -156,7 +132,8 @@ artifact: patch                   # the form a session's work is archived in
 
 - **direction** says which way is better; **scale** says whether differences (`absolute`) or quotients
   (`ratio`) are what compare, which decides how selection weighs candidates and how `min_improvement`
-  is read (an amount, or a percentage); **anchor** says where the best-so-far curve starts.
+  is read (an amount, or a percentage); **anchor** says where the best-so-far curve starts: the
+  baseline's value by default, and the first valid session's when the baseline has none.
 - The evaluator reports named **checks** for each version it scores. A version is valid when every check
   in `gate` is true; a check that was not reported counts as failed.
 - Ranking uses a single metric. Others are recorded, shown and exported.
@@ -199,19 +176,34 @@ another.
 
 ## Commands
 
-A campaign is a directory whose `config.yaml` is its only configuration, and everything it produces
-stays in that directory.
+`<target>` is a task directory or a campaign directory. For a task directory, `--name` picks one of its
+runs (`default` when left out).
 
 ```sh
-infinievolve new campaigns/first            # writes a commented config.yaml to edit
-infinievolve run campaigns/first            # can be interrupted and run again
-infinievolve status campaigns/first
-infinievolve report campaigns/first [--task T]
-infinievolve export campaigns/first
-infinievolve reset campaigns/first --task T                        # start one task over
-infinievolve flag  campaigns/first --task T --session S --flag NAME --reason "..." [--level hard|soft|void]
-infinievolve clear campaigns/first --task T --session S --reason "..."
+infinievolve init mytask                    # a new task directory to fill in
+infinievolve check <target> [--prompt]      # what a run would do, and its first prompt; starts nothing
+infinievolve run <target> [--name N]        # can be interrupted and run again
+        [--agent claude/<model> | --agent-command "..."] [--sessions N] [--start best|explore|baseline]
+                                            # ... the settings of a task directory's run, given at its first run
+infinievolve status <target>
+infinievolve report <target> [--task T]
+infinievolve export <target>
+infinievolve reset <target> --task T                               # start one task over
+infinievolve flag  <target> --task T --session S --flag NAME --reason "..." [--level hard|soft|void]
+infinievolve clear <target> --task T --session S --reason "..."
+infinievolve new campaigns/first            # a commented campaign config.yaml to edit
 ```
+
+A campaign is a directory whose `config.yaml` is its only configuration, and everything it produces
+stays in that directory. A task directory's runs are campaigns too: `infinievolve run mytask` writes
+`mytask/runs/default/config.yaml` the first time, and that file is the run's configuration from then on.
+
+`infinievolve new` writes a config that lists every setting with a comment; `infinievolve check` reads a
+config (or a task directory) and says what it amounts to before anything is spent.
+
+`run` stays in the foreground for as long as the campaign lasts and prints a line per archived session.
+For a long campaign, start it where it survives your terminal (`nohup`, `tmux`) and send its output to a
+file. If it is stopped, jobs already submitted keep going, and the next `run` picks them up.
 
 `prompt.carry` sets what a session inherits from the ones before it, independently of what it starts
 from: `full` (the table, every report, every session's work), `reports` (without the work) or `none`
@@ -219,7 +211,9 @@ from: `full` (the table, every report, every session's work), `reports` (without
 
 ## Writing an adapter
 
-An adapter is the only code that knows your tasks. It implements `infinievolve.core.adapter.Adapter`:
+An adapter is the only code that knows how your tasks run. The built-in one, `local`, runs every job as a
+process on this machine; a task directory uses it without saying so. Write your own to run sessions
+elsewhere or to evaluate differently. It implements `infinievolve.core.adapter.Adapter`:
 
 | It says | With |
 |---|---|
@@ -230,22 +224,18 @@ An adapter is the only code that knows your tasks. It implements `infinievolve.c
 | whether the environment is broken | `baseline_problem` |
 | how archived work is scored again, if it declares `confirm` | `submit_rescore` |
 
-Jobs are asynchronous: `submit_*` returns a handle the adapter can find the job by after a restart,
-`poll` says which jobs are over, `collect` returns the scored versions, their work, the report, timing
-and any flags. Three exceptions tell the loop what a failure means: `JobFailed` (pause the task),
-`AgentUnavailable` (the agent's service refused; wait, then resubmit) and `HostFault` (the place it ran
-is broken; resubmit at once).
+**[Writing an adapter](docs/writing-an-adapter.md)** is the full guide: what the framework hands an
+adapter and expects back, method by method, the result `collect` returns field by field, how to report a
+job that went wrong, and how to test an adapter before spending anything on an agent.
+[`infinievolve/local.py`](infinievolve/local.py) is a complete adapter in one file to start from, and
+[`examples/faibench`](examples/faibench) one whose jobs run on a cluster.
 
-A campaign names its adapter as a registered name, an entry point of the group `infinievolve.adapters`,
-`package.module:Name`, or `path/to/file.py:Name`.
+For tasks ranked by how fast something runs, [Tasks ranked by speed](docs/timing-tasks.md) describes the
+layer between the framework and such adapters: paired timing, repeat scoring, and when a measurement is
+not believed.
 
-[`examples/local`](examples/local) is a complete adapter in one file that runs every job as a local
-process: copy it and change it. Where sessions run, how an agent is started and how accounts are managed
-are deliberately left to adapters.
-
-The prompt is assembled from three sources, so that the framework's own text says nothing about any kind
-of task: the framework's skeleton (how a session works, the archive, the closing report), the
-declaration (the table's columns, the report's fields) and the adapter's `PromptText`.
+A campaign names its adapter as `local`, a registered name, an entry point of the group
+`infinievolve.adapters`, `package.module:Name`, or `path/to/file.py:Name`.
 
 ## Tests
 
@@ -253,8 +243,8 @@ declaration (the table's columns, the report's fields) and the adapter's `Prompt
 uv pip install -p .venv pytest && .venv/bin/python -m pytest -q
 ```
 
-`tests/fake_adapter.py` stands in for an adapter without running anything; one test runs the local
-example end to end and needs `git`.
+`tests/fake_adapter.py` stands in for an adapter without running anything; two tests run task
+directories end to end with the built-in adapter and need `git`.
 
 ## License
 
