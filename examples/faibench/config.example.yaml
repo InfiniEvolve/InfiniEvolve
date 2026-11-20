@@ -1,0 +1,44 @@
+# A campaign over fai-bench tasks. Copy to <campaign>/config.yaml and fill in.
+# It names your hosts, paths and credential file: keep the filled-in copy out of public repositories.
+
+campaign:
+  adapter: examples/faibench/adapter.py:FaiBenchAdapter     # relative to where you run infinievolve
+  tasks:
+    - <task name from tasks_index.json>
+  max_parallel: 2
+  poll_seconds: 60
+
+agent:
+  path: /cluster/path/to/claude                  # the Claude Code binary, readable from the nodes
+  model: <model>
+  effort: medium
+  secret_env: /cluster/path/to/token.env         # holds CLAUDE_CODE_OAUTH_TOKEN=...
+
+strategy:
+  start: best
+
+stop:
+  max_sessions: 6
+  window_k: 3
+  min_improvement: 2                             # percent: the ranking metric is a ratio
+
+prompt:
+  carry: full
+  # rules:
+  #   - "Use only the task's submit tool for feedback."
+
+options:
+  repo: /local/path/to/the/task/packages
+  ssh_host: login.example.org
+  remote_root: /cluster/path/for/jobs
+  image_root: /cluster/path/to/images
+  # submit_command: condor_submit
+
+  # Off unless set (see adapter.py):
+  # requirements: 'TARGET.CPUModel == "<model>"'
+  # cpu_model: "<model>"
+  # hosts_file: hosts.yaml
+  # wallclock: true
+  # reap_processes: true
+  # forbidden:
+  #   hidden_files_read: '<a regular expression over the agent's tool calls>'
