@@ -1,0 +1,54 @@
+# A campaign is a directory: its name is the directory name, this file is its only configuration, and
+# everything it produces stays beside it.
+#   infinievolve run <this directory>
+
+campaign:
+  # Which adapter runs the tasks: a registered name, an entry point of `infinievolve.adapters`,
+  # `package.module:Name`, or `path/to/file.py:Name` (relative to this directory or the current one).
+  adapter: your_package.adapter:YourAdapter
+  tasks:                          # task names the adapter knows, or: tasks: all
+    - your-task
+  max_parallel: 4                 # jobs in flight across all tasks
+  poll_seconds: 60
+  # Hard cap on one agent session. The agent is not told about it and decides itself when to stop.
+  # Default: each task's own limit, as the adapter gives it.
+  # session_minutes: 120
+
+# Free-form: the framework records these on every node and hands them to the adapter.
+agent:
+  program: your-agent
+  model: your-model
+
+strategy:
+  start: best                     # best | explore | baseline
+  seed: 0
+  sharpness: 2.0                  # explore only
+
+stop:
+  max_sessions: 12                # n
+  window_k: 3                     # k: stop when the last k sessions ...
+  min_improvement: 0              # x: ... did not beat the best value by more than x
+                                  #    (a percentage when the ranking metric is a ratio, an amount otherwise)
+
+prompt:
+  report_chars: 4000              # per-session report length in the prompt (the full archive keeps all of it)
+  carry: full                     # full | reports | none: what a session inherits from the ones before it
+  # rules:                        # extra rules shown to every session
+  #   - ...
+  # hide_scores: false
+
+# Overrides of the adapter's declaration for its tasks.
+# evaluation:
+#   rank_by: <metric>
+#   show: [<metric>, ...]
+#   gate: [<check>, ...]
+#   confirm: {samples: 2, aggregate: median}
+
+# Per-task changes to session_minutes, start, max_sessions, window_k, min_improvement, carry, hide_scores,
+# hold, evaluation:
+# task_overrides:
+#   your-task:
+#     max_sessions: 6
+
+# Passed to the adapter as they are.
+options: {}

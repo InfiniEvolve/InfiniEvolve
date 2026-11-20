@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.DS_Store
+/build/
+/dist/
+# a campaign keeps its config.yaml under version control; everything it produces stays local
+campaigns/*/*
+!campaigns/*/config.yaml
+examples/local/campaigns/*/*
+!examples/local/campaigns/*/config.yaml
+.env
