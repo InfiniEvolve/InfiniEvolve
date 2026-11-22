@@ -76,6 +76,10 @@ is required and covers all seeds plus equivalence. It is separate from timed tra
 
 ## Prepare and preview
 
+Read the [complete agent prompt preview](PROMPT_PREVIEW.md) for the generated first-session
+task text, appended system prompt and tool permissions. Its GPU count, seeds and 600-second
+budget are explicitly labeled as example parameters; producing the preview runs no experiment.
+
 Use a clean checkout at the pinned commit and a verified local FineWeb dataset. Record its
 revision and shard checksums in the campaign. The evaluator does not download data. Use the
 upstream CUDA/PyTorch environment (the pin requires Torch 2.11); compile dependencies for
