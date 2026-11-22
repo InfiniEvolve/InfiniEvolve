@@ -1,37 +1,36 @@
 # DepthDash agent prompt preview
 
-Snapshot of the prompt generated from commit `74cd7e98ebd60cd2477faf4e79ea130865b82d50`,
-using [`prepare.py`](prepare.py) and [`config.example.yaml`](config.example.yaml).
+Generated from this branch's [`prepare.py`](prepare.py), [`RESEARCH_FIRST.md`](RESEARCH_FIRST.md)
+and [`config.example.yaml`](config.example.yaml). ARIS is pinned to
+`4ba94ae2a1c1fbbb14858750dd8764cabf6c28bd`.
 
 **The GPU count (8), seeds (0, 1, 2), and 600-second timed training budget per seed
 are example parameters for this preview. They do not specify a newly launched experiment
-or impose these values on every campaign.** This snapshot uses the README's `deep` /
-`diagnostic-loss` example; select actual resources, seeds and scoring settings when preparing
-a future campaign. The 600 seconds cover timed training, not compilation, validation or
-the entire agent session. See [scoring and resources](README.md#scoring-and-resources)
-for the separate official benchmark requirements.
+or impose these values on every campaign.** The 600 seconds cover timed training, not
+compilation, validation, research or the entire agent session. Select actual campaign
+resources separately; see [scoring and resources](README.md#scoring-and-resources).
 
 Generated with `python -m infinievolve.cli check /path/to/campaign --prompt`.
 No agent, compilation, training or GPU job was started to produce this preview.
 
-This contains the complete adapter-supplied first-session task prompt and appended system
-prompt template, including the explicit permission to write Triton/CUDA operators, compile
-them and run GPU tests. Claude Code manages its own built-in system prompt. At runtime,
-`EVOLVE_ARCHIVE` expands to that session's archive path; later sessions also receive their
-actual starting point and archive context. The task prompt below is preserved verbatim.
+This is the complete adapter-supplied first-session task prompt and appended system prompt.
+Claude Code supplies its own built-in system prompt and loads the ARIS skill body when the
+agent invokes `aris:research-lit`. Later sessions receive their actual archive and starting
+point. The effective time limit is in the runtime session request, not these example values.
 
 ## Appended system prompt
 
 ```text
-Read the full archive at $EVOLVE_ARCHIVE and follow the task's DepthDash rules. You may write Triton/CUDA operators, compile them and run GPU tests or development training.
+At the start of every session, follow the task's research-first instructions and invoke aris:research-lit before implementing. Read the full archive at $EVOLVE_ARCHIVE, update research/REVIEW.md with verified sources and the next hypothesis, and follow the task's DepthDash rules. You may write Triton/CUDA operators, compile them and run GPU tests or development training. Read the effective session time limit before scheduling long tests, and select your best supported submission before that deadline.
 ```
 
-## Tool permissions
+## Plugin and tool permissions
 
 ```text
+--plugin-dir "$ARIS_REPO"
 --permission-mode acceptEdits
---tools 'Read,Glob,Grep,Edit,Write,Bash'
---allowedTools 'Read' 'Glob' 'Grep' 'Edit' 'Write' 'Bash'
+--tools 'Read,Glob,Grep,Edit,Write,Bash,Skill,WebSearch,WebFetch'
+--allowedTools 'Read' 'Glob' 'Grep' 'Edit' 'Write' 'Bash' 'Skill' 'WebSearch' 'WebFetch'
 ```
 
 ## Complete first-session task prompt
@@ -57,6 +56,53 @@ SESSION-REPORT-END
 ## Task
 
 Optimize DepthDash's deep track (L28, d512), starting from Pre-LN.
+# Research before implementation — every session
+
+Begin every session with a focused literature and implementation review, before changing
+submission code or starting compilation/training. Read the task rules, the full archive at
+`EVOLVE_ARCHIVE`, and any existing `research/` notes first. Invoke the installed ARIS skill
+`aris:research-lit` with `— sources: web` for the next unresolved DepthDash question. Use
+the skill's paper-identity verification helper; `ARIS_REPO` points to the pinned plugin
+and its `tools/` directory. WebSearch and WebFetch are available alongside Bash. If a
+search service fails, try another public primary source or the ARIS arXiv helper. Record
+access failures and unverified claims honestly; do not invent citations or call an empty
+search a completed review.
+
+Study both residual/normalization designs for deep transformers and relevant efficient
+implementations. Read DepthDash's existing baselines and fast models so a known technique
+is not presented as a new invention. Follow useful papers to their original text and
+official code. Distinguish a reference-math change (allowed residual design), a mathematically
+equivalent fast implementation, and execution/hyperparameter tuning. All remain available;
+Triton/CUDA/C++ operators, compilation, profiling, and GPU tests are explicitly permitted
+under the original DepthDash rules. Do not force an architecture change without evidence.
+
+Before implementing, write or update `research/REVIEW.md` in the session workspace with:
+
+- This session's question, queries, sources actually read, URLs/IDs, verification status,
+  and code revision where available. Preserve the skill's evidence and verification receipts.
+- Relevant mechanisms and the evidence for them; clearly separate published measurements,
+  local measurements, hypotheses, and unknowns.
+- A comparison of promising approaches, their fit with DepthDash's rules, expected quality
+  and speed tradeoffs, and the next candidate's testable hypothesis.
+- The selected change, what it changes (math, implementation, or settings), the smallest
+  useful validation, and why it is preferable to merely repeating previous tuning.
+
+Later sessions should reuse verified notes and update only gaps, new evidence, and the next
+hypothesis. Do not repeat a broad survey from scratch. Keep research in proportion to the
+available session time; this is a preparation step, not an instruction to launch ARIS's
+entire autonomous research/paper pipeline or external notifications.
+
+Read the effective `time_limit_seconds` from the sibling `request.json` next to
+`EVOLVE_PROMPT` before planning long calls, and honor any earlier wrapper deadline in the
+system prompt. Reserve time to finish or stop development processes, put the best supported
+candidate in `submission/run.json`, and write the final session report. Do not leave a better
+tested candidate unselected while starting another long optional benchmark. These are
+operational time limits, not restrictions on the benchmark's permitted optimization scope.
+
+Keep research artifacts in the workspace so InfiniEvolve archives them with the candidate
+and can carry them into later sessions. In the final session report, identify the research
+that informed the change and link `research/REVIEW.md` and any supporting test logs.
+
 Read README.md, model.py, check_equivalence.py, and baselines/ (including baselines/fast/).
 Follow the upstream Rules section. The four frozen files are train_gpt.py, model.py, tracks.py,
 and check_equivalence.py. Other source files may be added or edited, including helpers, custom

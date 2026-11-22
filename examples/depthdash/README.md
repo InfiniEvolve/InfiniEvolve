@@ -76,6 +76,38 @@ is required and covers all seeds plus equivalence. It is separate from timed tra
 
 ## Prepare and preview
 
+### Install ARIS and research before each session
+
+The Claude agent loads [ARIS](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep)
+as an explicit plugin and starts each session with `aris:research-lit`. Install the pinned
+version on the same shared filesystem visible to the agent workers:
+
+```sh
+git clone https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep.git /path/to/aris
+git -C /path/to/aris checkout 4ba94ae2a1c1fbbb14858750dd8764cabf6c28bd
+export ARIS_REPO=/path/to/aris
+claude plugin validate "$ARIS_REPO"
+```
+
+Export `ARIS_REPO` in the job launcher as well. The explicit `--plugin-dir` works even
+with the template's empty `--setting-sources`; merely installing user skills would not
+be enough to configure this isolated launcher. Skill, WebSearch and WebFetch are enabled.
+The helper scripts resolve through `ARIS_REPO`. The web literature-review route does not
+require Zotero, a Codex reviewer login, or a new paid search service; optional ARIS routes
+may need their own setup. The full autonomous ARIS pipeline is not started by this template.
+
+The [research-first instruction](RESEARCH_FIRST.md) is included in every prepared task.
+Each session records sources, verification status, relevant approaches, rule compatibility,
+and its next hypothesis in `research/REVIEW.md` before implementing. Notes and skill receipts
+are archived with the candidate; later sessions refine them rather than repeating the whole
+survey. This is an agent workflow instruction, not a new scoring gate or a claim that a file's
+existence proves the quality of the research. Existing prepared tasks retain their original
+prompt: prepare a new task/campaign from the updated code to adopt the instruction.
+
+Read the effective session limit from the session request and reserve time to activate the
+best tested candidate. Research time counts toward that limit; it does not change the
+benchmark's model, kernel, or GPU-testing permissions.
+
 Read the [complete agent prompt preview](PROMPT_PREVIEW.md) for the generated first-session
 task text, appended system prompt and tool permissions. Its GPU count, seeds and 600-second
 budget are explicitly labeled as example parameters; producing the preview runs no experiment.

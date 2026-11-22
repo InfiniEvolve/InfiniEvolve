@@ -68,7 +68,10 @@ def prepare(upstream, task, data_dir, *, track="deep", gpus=8, seeds=(0, 1, 2),
                 if score == "diagnostic-loss" else
                 f"Rank mean train_time, gated by mean final loss <= {shape.target} at one-sided t-test p < 0.01. "
                 "Use the declared steps on all seeds; the allocation must be 8 H100 SXM GPUs.")
+    research = (HERE / "RESEARCH_FIRST.md").read_text().strip()
     instruction = f"""Optimize DepthDash's {track} track (L{shape.num_layers}, d{shape.model_dim}), starting from Pre-LN.
+{research}
+
 Read README.md, model.py, check_equivalence.py, and baselines/ (including baselines/fast/).
 Follow the upstream Rules section. The four frozen files are train_gpt.py, model.py, tracks.py,
 and check_equivalence.py. Other source files may be added or edited, including helpers, custom

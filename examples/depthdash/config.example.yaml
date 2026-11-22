@@ -7,16 +7,18 @@ campaign:
   poll_seconds: 5
 
 # Credentials come from your existing Claude Code login/environment.
-# Bash enables compilation, profiling, equivalence checks and development training.
+# Set ARIS_REPO to the installed ARIS plugin directory (see README).
+# Bash enables compilation/GPU tests; Skill/WebSearch/WebFetch enable research.
 agent:
   command: >-
     claude -p --model YOUR_MODEL --effort medium
     --output-format stream-json --verbose --no-session-persistence
     --permission-mode acceptEdits
     --setting-sources '' --strict-mcp-config --mcp-config '{"mcpServers":{}}'
-    --append-system-prompt "Read the full archive at $EVOLVE_ARCHIVE and follow the task's DepthDash rules. You may write Triton/CUDA operators, compile them and run GPU tests or development training."
-    --tools 'Read,Glob,Grep,Edit,Write,Bash'
-    --allowedTools 'Read' 'Glob' 'Grep' 'Edit' 'Write' 'Bash'
+    --plugin-dir "${ARIS_REPO:?Set ARIS_REPO to the installed ARIS plugin directory}"
+    --append-system-prompt "At the start of every session, follow the task's research-first instructions and invoke aris:research-lit before implementing. Read the full archive at $EVOLVE_ARCHIVE, update research/REVIEW.md with verified sources and the next hypothesis, and follow the task's DepthDash rules. You may write Triton/CUDA operators, compile them and run GPU tests or development training. Read the effective session time limit before scheduling long tests, and select your best supported submission before that deadline."
+    --tools 'Read,Glob,Grep,Edit,Write,Bash,Skill,WebSearch,WebFetch'
+    --allowedTools 'Read' 'Glob' 'Grep' 'Edit' 'Write' 'Bash' 'Skill' 'WebSearch' 'WebFetch'
 
 strategy:
   start: best
