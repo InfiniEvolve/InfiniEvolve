@@ -308,7 +308,7 @@ class TaskLoop:
                 index = len([node for node in nodes if not node.is_root]) + 1
                 spec = self._prepare(index, nodes, ranked, declaration)
             else:
-                spec = self._load_spec(prepared)
+                spec = self._prepare_again(prepared, nodes, ranked, declaration)
             handle = self.adapter.submit_session(spec, self.store.session_dir(spec.session_id), self.store.events)
             job = self._record_job(spec.session_id, "session", handle)
             self.log(f"[{self.task}/{spec.session_id}] submitted, start from {spec.parent_id or 'baseline'} "
@@ -394,13 +394,39 @@ class TaskLoop:
         return self._record_job(ROOT_ID, "baseline", handle)
 
     def _prepared_session(self) -> str | None:
-        """A session whose inputs exist but which was never submitted (a crash in between)."""
+        """A session whose inputs exist but which was never submitted: a crash in between, or a submit the
+        adapter refused (a round gate, a quota)."""
         for path in sorted((self.store.root / "sessions").glob("s*/input/spec.json")):
             directory = path.parent.parent
             if directory.name != ROOT_ID and not (directory / "node.json").is_file() \
                     and not (directory / "job.json").is_file():
                 return directory.name
         return None
+
+    def _prepare_again(self, sid: str, nodes: list[Node], ranked: list[Node], declaration: Declaration) -> SessionSpec:
+        """Prepare a session that was never submitted once more, from the current state: the instruction, the
+        prompt text and the archive may all have changed since. It keeps its id; nothing of the earlier
+        preparation is handed on."""
+        directory = self.store.session_dir(sid) / "input"
+        old = read_json(directory / "spec.json")
+        old_prompt = (directory / "prompt.md").read_text() if (directory / "prompt.md").is_file() else ""
+        # spec.json first: a crash from here on leaves a session that is no longer prepared, and the next
+        # run prepares the same index from scratch
+        (directory / "spec.json").unlink()
+        for name in ("prompt.md", "archive.md", "selection.json"):
+            (directory / name).unlink(missing_ok=True)
+        for pattern in ("start.*", "reference.*"):
+            for path in directory.glob(pattern):
+                path.unlink()
+        spec = self._prepare(int(old["index"]), nodes, ranked, declaration)
+        changed = {"prompt_changed": spec.prompt != old_prompt,
+                   "parent_changed": spec.parent_id != old.get("parent_id")}
+        self.store.events.emit("session_reprepared", sid, previously_prepared_at=old.get("prepared_at"),
+                               previous_parent=old.get("parent_id"), parent=spec.parent_id, **changed)
+        self.log(f"[{self.task}/{sid}] was prepared but never submitted; prepared again from the current state"
+                 + (f" ({', '.join(key.split('_')[0] for key, value in changed.items() if value)} changed)"
+                    if any(changed.values()) else ""))
+        return spec
 
     def _prepare(self, index: int, nodes: list[Node], ranked: list[Node], declaration: Declaration) -> SessionSpec:
         sid = session_id(index)

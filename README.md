@@ -112,7 +112,8 @@ them did not beat the best value by more than `min_improvement`.
 - **What runs when.** Sessions of one task run one after another, because each reads the archive of
   those before it. Different tasks run side by side, up to `max_parallel` jobs at once.
 - **Interruptions.** A run can be stopped at any point; running it again re-attaches to jobs that are
-  still going and resubmits what was prepared but not started.
+  still going. A session that was prepared but never submitted (a crash, or a submit the adapter
+  refused) keeps its id but is prepared again from the current instruction, prompt and archive.
 
 ## What you declare
 

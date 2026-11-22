@@ -280,3 +280,33 @@ def test_without_a_valid_baseline_the_first_valid_session_is_the_reference(tmp_p
     (tmp_path / "config.yaml").write_text("campaign: {adapter: fake, tasks: all}\noptions: {values: {a: []}}\n")
     assert main(["flag", str(tmp_path), "--task", "a", "--session", "s002", "--flag", "wrong", "--reason", "x"]) == 0
     assert {row["reference"] for row in matrix_rows(store.task("a"))} == {"s003"}
+
+
+def test_a_session_the_adapter_refused_is_prepared_again_from_the_current_state(tmp_path, monkeypatch):
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0]}, stop={"max_sessions": 1})
+    calls = {"n": 0}
+    submit = fake_adapter.FakeAdapter.submit_session
+
+    def gated(self, spec, session_dir, events):
+        calls["n"] += 1
+        if calls["n"] == 1:   # an adapter-side gate (a round pause, a quota) refuses once
+            raise RuntimeError("round 1 is over; release and run again")
+        return submit(self, spec, session_dir, events)
+    monkeypatch.setattr(fake_adapter.FakeAdapter, "submit_session", gated)
+
+    state, _ = run(store, config)
+    assert "a" in state["paused"] and "s001" not in nodes(store)
+    inputs = tmp_path / "tasks" / "a" / "sessions" / "s001" / "input"
+    assert "Do a." in (inputs / "prompt.md").read_text()
+    (inputs / "reference.txt").write_text("left from an earlier preparation")
+
+    # the operator rewrites the task statement, then runs again
+    monkeypatch.setattr(fake_adapter.FakeAdapter, "instruction", lambda self, task: "NEW INSTRUCTION")
+    _, adapter = run(store, config)
+    assert "s001" in nodes(store)                       # the same session, not a new index
+    [spec] = adapter.submitted
+    assert spec.session_id == "s001" and "NEW INSTRUCTION" in spec.prompt and "Do a." not in spec.prompt
+    assert "NEW INSTRUCTION" in (inputs / "prompt.md").read_text()
+    assert not (inputs / "reference.txt").exists()      # nothing of the old preparation is handed on
+    [event] = events(store, "session_reprepared")
+    assert event["session_id"] == "s001" and event["data"]["prompt_changed"] is True
