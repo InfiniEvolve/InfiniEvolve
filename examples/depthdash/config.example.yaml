@@ -1,0 +1,30 @@
+# Run from the InfiniEvolve checkout, inside a one-GPU allocation.
+# Copy this file to a campaign directory and replace YOUR_MODEL and task_dir.
+campaign:
+  adapter: examples/depthdash/adapter.py:DepthDashAdapter
+  tasks: [deep]
+  max_parallel: 1
+  poll_seconds: 5
+
+# Credentials come from your existing Claude Code login/environment.
+# File tools only: the evaluator performs training after each session.
+agent:
+  command: >-
+    claude -p --model YOUR_MODEL --effort medium
+    --output-format stream-json --verbose --no-session-persistence
+    --permission-mode dontAsk --max-budget-usd 3
+    --setting-sources '' --strict-mcp-config --mcp-config '{"mcpServers":{}}'
+    --append-system-prompt "Read the full archive at $EVOLVE_ARCHIVE. Only submission/residual.py may be edited."
+    --tools 'Read,Glob,Grep,Edit,Write'
+    --allowedTools 'Read' 'Glob' 'Grep' 'Edit(./submission/residual.py)' 'Write(./submission/residual.py)'
+
+strategy:
+  start: best
+stop:
+  max_sessions: 3
+  window_k: 3
+  min_improvement: 0
+prompt:
+  carry: full
+options:
+  task_dir: /absolute/path/to/deep
