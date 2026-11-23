@@ -49,7 +49,7 @@ Files: README.md, infinievolve/templates/campaign.yaml, docs/parallel-rounds.md,
 - [x] Document configuration, round lifecycle, selection formulas, genetic semantics, carry override, resume behavior and adapter limits.
 - [x] Run a bounded real Codex task with 2 agents x 2 rounds and forced crossover/mutation. Verify process overlap, parent inputs, actual edits and evaluator output, then summarize in a results table.
 - [x] Complete independent whole-branch review and address consequential findings with regression tests. Final core suite: 95 passed, 1 skipped; Research suite against changed core: 6 passed.
-- [ ] Commit, push the feature branch, create upstream PR and verify its URL/state. Leave Research core pin unchanged.
+- [x] Commit and push the feature branch; created https://github.com/InfiniEvolve/InfiniEvolve/pull/8 against main. Leave the PR unmerged and the Research core pin unchanged.
 
 ## Progress and decisions
 
