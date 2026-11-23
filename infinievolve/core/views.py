@@ -33,7 +33,7 @@ def matrix_rows(store: TaskStore) -> list[dict]:
     for node in nodes:
         place = 0 if node.is_root else position.get(node.session_id)
         rows.append({
-            "session": node.session_id, "parent": node.parent_id, "start": node.start_strategy,
+            "session": node.session_id, "parent": node.parent_id, "parents": node.parent_ids, "round": node.round_id, "start": node.start_strategy,
             "scored": node.chosen_label, "valid": node.valid,
             "metrics": {name: metric_value(node, name) for name in declaration.metrics},
             "rank_value": node.rank_value, "best_so_far": curve[place] if place is not None else None,

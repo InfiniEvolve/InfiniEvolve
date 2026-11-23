@@ -10,6 +10,7 @@ campaign:
   adapter: local                  # the built-in adapter: task directories under options.tasks_dir
   tasks:                          # task names the adapter knows, or: tasks: all
     - your-task
+  agents_per_round: 1             # candidates per task per round; default keeps sequential behavior
   max_parallel: 4                 # jobs in flight across all tasks
   poll_seconds: 60
   # Hard cap on one agent session. The agent is not told about it and decides itself when to stop.
@@ -23,7 +24,13 @@ agent: claude/your-model
 strategy:
   start: best                     # best | explore | baseline
   seed: 0
-  sharpness: 2.0                  # explore only
+  sharpness: 2.0                  # legacy explore only
+  # selection: greedy             # greedy | probabilistic | genetic (enables round mode)
+  # temperature: 1.0              # positive; probabilistic/genetic fitness sampling
+  # population_size: 6            # genetic; default agents_per_round
+  # elite_count: 1                # genetic; 0..population_size
+  # crossover_rate: 0.8           # genetic; probability of a distinct second parent
+  # mutation_rate: 0.2            # genetic; independent probability of requesting mutation
 
 stop:
   max_sessions: 12                # n
@@ -47,7 +54,8 @@ prompt:
 #   confirm: {samples: 2, aggregate: median}
 
 # Per-task changes to session_minutes, start, max_sessions, window_k, min_improvement, carry, hide_scores,
-# hold, evaluation:
+# hold, evaluation, agents_per_round, selection, temperature, population_size, elite_count,
+# crossover_rate, mutation_rate:
 # task_overrides:
 #   your-task:
 #     max_sessions: 6

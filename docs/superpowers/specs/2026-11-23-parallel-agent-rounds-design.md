@@ -1,6 +1,6 @@
 # Parallel agent rounds
 
-Status: proposed; implementation and upstream PR pending design confirmation.
+Status: implemented for upstream review. The user confirmed Agent-mediated crossover and mutation; the core PR remains unmerged.
 
 ## Intent and constraints
 
@@ -14,7 +14,7 @@ This change belongs entirely in the upstream InfiniEvolve core. InfiniEvolve-Res
 2. Persist explicit rounds, freeze their input history, and wait at a round barrier before selection. Recommended: it fits the existing filesystem-backed scheduler and makes parentage, restart, and selection auditable.
 3. Run a second coordinator outside the core. Rejected: the user explicitly requires one core scheduler and an upstream PR.
 
-The implementation approach is a proposal, not a decision already approved by the user. Agent-mediated genetic crossover is also pending confirmation.
+The user confirmed Agent-mediated genetic crossover. Remaining implementation choices follow the recommendations below.
 
 ## Configuration and compatibility
 
@@ -112,4 +112,4 @@ Configuration parsing and template; persistent round/planning module; scheduler 
 6. Run a small real-agent two-round smoke task with two agents per round and genetic crossover/mutation forced on, inspecting both parent inputs, agent edits, evaluator verdicts, and recorded lineage. Keep budget limited; this demonstrates execution, not research-quality gains or genetic-search superiority. If authentication/quota blocks the model run, report the exact limitation and do not label a fake adapter as a real agent.
 7. Submit an upstream PR with implementation, user documentation, exact validation evidence, and limitations. Leave it unmerged and leave the Research submodule pin unchanged.
 
-Implementation details such as helper names, file organization, stable seed serialization, and individual test fixture layout are left to the builder, subject to these behaviors. Proposed defaults and policy semantics above are author recommendations awaiting confirmation.
+Implementation details such as helper names, file organization, stable seed serialization, and individual test fixture layout are left to the builder, subject to these behaviors. Defaults and detailed policy semantics above are implementation recommendations; Agent-mediated crossover was explicitly confirmed by the user.

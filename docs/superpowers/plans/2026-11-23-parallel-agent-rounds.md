@@ -29,29 +29,33 @@
 
 Files: infinievolve/config.py, infinievolve/core/round_selection.py, tests/test_round_selection.py.
 Interfaces: policy(settings) -> dict; choose(policy, nodes, metric, seed) -> audit dict; parents(policy, population, metric, seed) -> audit dict.
-- [ ] Add tests for defaults, overrides, invalid configuration, softmax ties/direction/extremes, deterministic sampling, elites, deduplication and rate endpoints; run and observe failure.
-- [ ] Implement strict new configuration validation and pure deterministic selection/parent plans.
-- [ ] Run `.venv/bin/python -m pytest -q tests/test_round_selection.py` (using the Research venv absolute path), expect all pass; commit.
+- [x] Add tests for defaults, overrides, invalid configuration, softmax ties/direction/extremes, deterministic sampling, elites, deduplication and rate endpoints; run and observe failure.
+- [x] Implement strict new configuration validation and pure deterministic selection/parent plans.
+- [x] Run `.venv/bin/python -m pytest -q tests/test_round_selection.py` (using the Research venv absolute path), expect all pass; commit.
 
 ### Task 2: Persistent rounds and scheduler integration
 
 Files: core/rounds.py, core/loop.py, core/types.py, core/archive.py, core/views.py, tests/test_rounds.py.
 Interfaces: RoundController(loop).active() -> dict|None; next_job() -> Job|None; round status from files.
-- [ ] Add controlled-adapter tests for overlap, bounded waves, fair scheduling, identical history, barrier, partial final rounds, restarts, held work and failure recovery; observe failures.
-- [ ] Implement round persistence, pinned settings and parent plans, donor prompt delivery, deterministic confirmations, metadata and state, and fair global slot filling.
-- [ ] Add transition, flag, void, duplicate, hidden score and unsupported donor tests.
-- [ ] Run all tests, expect existing and added tests pass; commit.
+- [x] Add controlled-adapter tests for overlap, bounded waves, fair scheduling, identical history, barrier, partial final rounds, restarts, held work and failure recovery; observe failures.
+- [x] Implement round persistence, pinned settings and parent plans, donor prompt delivery, deterministic confirmations, metadata and state, and fair global slot filling.
+- [x] Add transition, flag, void, duplicate, hidden score and unsupported donor tests.
+- [x] Run all tests, expect existing and added tests pass; commit.
 
 ### Task 3: Documentation and end-to-end verification
 
 Files: README.md, infinievolve/templates/campaign.yaml, docs/parallel-rounds.md, tests/test_round_local.py.
-- [ ] Test LocalAdapter primary restoration and donor delivery through actual child processes; clearly label scripted models.
-- [ ] Document configuration, round lifecycle, selection formulas, genetic semantics, carry override, resume behavior and adapter limits.
-- [ ] Run a bounded real Codex task with 2 agents x 2 rounds and forced crossover/mutation. Verify process overlap, parent inputs, actual edits and evaluator output, then summarize in a results table.
-- [ ] Run core and Research integration suites against the changed core; independent whole-branch review; address consequential findings with regression tests.
+- [x] Test LocalAdapter primary restoration and donor delivery through actual child processes; clearly label scripted models.
+- [x] Document configuration, round lifecycle, selection formulas, genetic semantics, carry override, resume behavior and adapter limits.
+- [x] Run a bounded real Codex task with 2 agents x 2 rounds and forced crossover/mutation. Verify process overlap, parent inputs, actual edits and evaluator output, then summarize in a results table.
+- [ ] Complete independent whole-branch review and address consequential findings with regression tests. Pre-review core suite: 89 passed, 1 skipped; Research suite against changed core: 6 passed.
 - [ ] Commit, push the feature branch, create upstream PR and verify its URL/state. Leave Research core pin unchanged.
 
 ## Progress and decisions
 
 - Baseline: 58 passed, 1 skipped before implementation.
 - User confirmed Agent-mediated crossover/mutation. Proceed inline under the user's existing request to implement and submit the core PR; no additional execution-method approval is needed.
+
+- Task 1 complete: 15 policy/config tests passed after initial missing-module failure.
+- Task 2 complete: concurrency/barrier tests failed against the sequential loop, then passed; full core suite now 89 passed, 1 skipped.
+- Task 3 in progress: real 2x2 Codex genetic run completed; all four archived patches independently re-evaluated successfully, both crossover offspring passed 6/6 cases.

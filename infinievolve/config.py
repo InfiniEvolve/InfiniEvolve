@@ -2,11 +2,14 @@
 
     campaign:    adapter (a registered name, an entry point, `package.module:Name` or `path/to/file.py:Name`),
                  tasks (a list, or "all"), max_parallel (jobs in flight across tasks), poll_seconds,
+                 agents_per_round (default 1),
                  session_minutes (optional hard cap per agent session; default from each task),
                  name (optional; must equal the directory name)
     agent:       settings of the agent, free-form: a mapping, or one string (kept as {spec: <string>}). The
                  framework records them on every node and hands them to the adapter; it reads none itself.
-    strategy:    start (best | explore | baseline), seed, sharpness (explore only)
+    strategy:    start (legacy best | explore | baseline), seed, sharpness (legacy explore only),
+                 selection (greedy | probabilistic | genetic), temperature, population_size,
+                 elite_count, crossover_rate, mutation_rate
     stop:        max_sessions (n), window_k (k), min_improvement (x: a percentage when the ranking metric
                  is a ratio, an amount when it is absolute)
     prompt:      report_chars, carry (full | reports | none), rules (extra rules shown to every session),
