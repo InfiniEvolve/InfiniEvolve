@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import math
 
 import yaml
 
@@ -32,9 +33,11 @@ from .core.selection import STRATEGIES
 #   full     the archive as it is: the table, every report, every session's archived work
 #   reports  the same without the archived work, so earlier work cannot be copied out of the archive
 #   none     no archive at all, and the prompt never mentions one
+ROUND_KEYS = ("agents_per_round", "selection", "temperature", "population_size", "elite_count",
+              "crossover_rate", "mutation_rate")
 CARRY = ("full", "reports", "none")
 OVERRIDABLE = ("session_minutes", "start", "max_sessions", "window_k", "min_improvement", "carry", "hide_scores",
-               "hold", "evaluation")
+               "hold", "evaluation") + ROUND_KEYS
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,13 @@ class TaskSettings:
     window_k: int
     min_improvement: float
     report_chars: int
+    agents_per_round: int = 1
+    selection: str | None = None
+    temperature: float = 1.0
+    population_size: int | None = None
+    elite_count: int = 1
+    crossover_rate: float = 0.8
+    mutation_rate: float = 0.2
     carry: str = "full"
     hide_scores: bool = False
     hold: bool = False
@@ -74,6 +84,24 @@ class CampaignConfig:
 
 
 def check_settings(settings: TaskSettings, where: str) -> None:
+    for key in ("agents_per_round", "population_size", "elite_count"):
+        value = getattr(settings, key)
+        if key == "population_size" and value is None:
+            continue
+        if type(value) is not int or value < (0 if key == "elite_count" else 1):
+            raise ValueError(f"{where}{key} must be an integer >= {0 if key == 'elite_count' else 1}")
+    if settings.elite_count > (settings.population_size or settings.agents_per_round):
+        raise ValueError(f"{where}elite_count must not exceed population_size")
+    if settings.selection not in (None, "greedy", "probabilistic", "genetic"):
+        raise ValueError(f"{where}selection must be greedy, probabilistic, or genetic")
+    if (settings.selection is not None or settings.agents_per_round > 1) and settings.start != "best":
+        raise ValueError(f"{where}round mode requires default start: best; use strategy.selection instead")
+    for key in ("temperature", "crossover_rate", "mutation_rate"):
+        value = getattr(settings, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{where}{key} must be finite")
+        if (key == "temperature" and value <= 0) or (key != "temperature" and not 0 <= value <= 1):
+            raise ValueError(f"{where}{key} is out of range")
     if settings.start not in STRATEGIES:
         raise ValueError(f"{where}start must be one of {STRATEGIES}")
     if settings.carry not in CARRY:
@@ -114,6 +142,10 @@ def parse_config(data: dict, name: str | None = None, root: Path | None = None) 
         sharpness=float(strategy.get("sharpness", 2.0)),
         max_sessions=int(stop.get("max_sessions", 10)), window_k=int(stop.get("window_k", 3)),
         min_improvement=float(stop.get("min_improvement", 0.0)),
+        agents_per_round=campaign.get("agents_per_round", 1),
+        selection=strategy.get("selection"), temperature=strategy.get("temperature", 1.0),
+        population_size=strategy.get("population_size"), elite_count=strategy.get("elite_count", 1),
+        crossover_rate=strategy.get("crossover_rate", 0.8), mutation_rate=strategy.get("mutation_rate", 0.2),
         report_chars=int(prompt.get("report_chars", 4000)), carry=str(prompt.get("carry", "full")),
         hide_scores=bool(prompt.get("hide_scores", False)),
         prompt_rules=tuple(str(rule) for rule in prompt.get("rules") or ()),
