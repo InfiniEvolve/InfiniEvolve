@@ -48,7 +48,7 @@ Files: README.md, infinievolve/templates/campaign.yaml, docs/parallel-rounds.md,
 - [x] Test LocalAdapter primary restoration and donor delivery through actual child processes; clearly label scripted models.
 - [x] Document configuration, round lifecycle, selection formulas, genetic semantics, carry override, resume behavior and adapter limits.
 - [x] Run a bounded real Codex task with 2 agents x 2 rounds and forced crossover/mutation. Verify process overlap, parent inputs, actual edits and evaluator output, then summarize in a results table.
-- [ ] Complete independent whole-branch review and address consequential findings with regression tests. Pre-review core suite: 89 passed, 1 skipped; Research suite against changed core: 6 passed.
+- [x] Complete independent whole-branch review and address consequential findings with regression tests. Final core suite: 95 passed, 1 skipped; Research suite against changed core: 6 passed.
 - [ ] Commit, push the feature branch, create upstream PR and verify its URL/state. Leave Research core pin unchanged.
 
 ## Progress and decisions
@@ -59,3 +59,15 @@ Files: README.md, infinievolve/templates/campaign.yaml, docs/parallel-rounds.md,
 - Task 1 complete: 15 policy/config tests passed after initial missing-module failure.
 - Task 2 complete: concurrency/barrier tests failed against the sequential loop, then passed; full core suite now 89 passed, 1 skipped.
 - Task 3 in progress: real 2x2 Codex genetic run completed; all four archived patches independently re-evaluated successfully, both crossover offspring passed 6/6 cases.
+
+- Final review (ca479ab): five consequential findings accepted; the additional unverified ID-gap scenario was reproduced and elevated because it could overwrite archived inputs.
+- Final fixed: width-only changes retain probabilistic incumbent — test_width_change_preserves_probabilistic_incumbent RED→GREEN.
+- Final fixed: retained genetic copies are filtered before deduplication — test_retained_genetic_duplicate_is_not_lost_to_old_archive_id RED→GREEN.
+- Final fixed: opening a new round invalidates old stop status — test_opening_new_round_clears_old_stop_status RED→GREEN.
+- Final fixed: operator exclusions overlay frozen history and replan from eligible pre-round candidates — test_newly_excluded_parent_is_hidden_and_replanned_from_snapshot RED→GREEN.
+- Final fixed: finalization re-pools after interrupted confirmation — test_crash_after_last_confirmation_outcome_reconciles_pool RED→GREEN.
+- Final fixed: legacy allocation follows maximum archived index after round gaps; preparation refuses submitted/archived IDs — test_switch_to_legacy_after_partial_directory_keeps_ids_monotonic RED→GREEN.
+- Final minor (deferred): check --prompt previews the base session prompt, omitting genetic variation instructions. Actual submitted and archived prompts include them; document the preview limit.
+- Final review declined to judge: no real-model search-quality claim is made; scripted tests establish scheduler behavior and the real smoke establishes bounded model execution only.
+
+- Final verification: core 95 passed/1 skipped; Research integration 6 passed. Final-code real 2x2 rerun passed all four archived-patch evaluations and both donor/primary checks.

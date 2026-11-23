@@ -15,7 +15,7 @@ def current_stop(store: TaskStore) -> dict | None:
     scoring), which reopens the question."""
     events = store.events.read()
     position = next((i for i in range(len(events) - 1, -1, -1) if events[i]["type"] == "task_stop"), None)
-    if position is None or any(event["type"] in NODE_CHANGES for event in events[position + 1:]):
+    if position is None or any(event["type"] in (*NODE_CHANGES, "round_opened") for event in events[position + 1:]):
         return None
     return events[position]
 

@@ -241,3 +241,112 @@ def test_genetic_lineage_export_contains_both_edges(tmp_path):
         assert f'{parent} --> s003' in mermaid(graph)
     export(store, ['a'])
     assert 'parent_ids' in (store.exports_dir / 'nodes.csv').read_text().splitlines()[0]
+
+
+def test_width_change_preserves_probabilistic_incumbent(tmp_path):
+    store, config = setup(tmp_path, width=2, maximum=2, selection='probabilistic')
+    config = replace(config, defaults=replace(config.defaults, temperature=1000))
+    run(store, config)
+    assert rounds(store)[0]['outcome']['survivors'] == ['s000']
+    config = replace(config, defaults=replace(config.defaults, agents_per_round=3, max_sessions=3))
+    state, adapter = run(store, config)
+    assert not state['paused'] and adapter.submitted[0].parent_id == 's000'
+    assert 'transition' not in rounds(store)[1]
+
+
+def test_retained_genetic_duplicate_is_not_lost_to_old_archive_id(tmp_path):
+    store, config = setup(tmp_path, width=1, maximum=3, selection='genetic')
+    config.options['values']['a'][:4] = [
+        {'value': 2, 'work': b'A'}, {'value': 3, 'work': b'B'},
+        {'value': 6, 'work': b'A'}, {'value': 7, 'work': b'C'}]
+    state, adapter = run(store, config)
+    assert not state['paused']
+    assert rounds(store)[1]['outcome']['survivors'] == ['s002']
+    assert rounds(store)[2]['population'] == ['s002']
+    assert adapter.submitted[2].parent_id == 's002'
+
+
+def test_opening_new_round_clears_old_stop_status(tmp_path):
+    store, config = setup(tmp_path, width=2, maximum=2)
+    run(store, config)
+    config = replace(config, defaults=replace(config.defaults, max_sessions=3))
+    scheduler = Scheduler(store, config, Controlled(config), log=lambda _: None)
+    running = {}
+    scheduler._fill(running)
+    state = scheduler.write_state()
+    assert state['tasks']['a']['in_flight'] == ['s003']
+    assert not state['tasks']['a']['stopped'] and state['tasks']['a']['stop_reason'] is None
+
+
+def test_newly_excluded_parent_is_hidden_and_replanned_from_snapshot(tmp_path):
+    store, config = setup(tmp_path, width=2, maximum=4, prompt={'hide_scores': True, 'carry': 'full'})
+    config = replace(config, max_parallel=1)
+    adapter = Controlled(config)
+    scheduler = Scheduler(store, config, adapter, log=lambda _: None)
+    running = {}
+    for sid in ('s000', 's001', 's002', 's003'):
+        scheduler._fill(running)
+        loop, job = running.pop('a/' + sid)
+        loop.finish(job)
+    excluded = store.task('a').node('s002')
+    excluded.flags['manual'] = {'level': 'hard', 'note': 'invalid measurement'}
+    store.task('a').update_node(excluded)
+    scheduler._fill(running)
+    spec = adapter.submitted[-1]
+    assert spec.session_id == 's004'
+    assert 'work of s002' not in spec.archive_md
+    assert 'Report and work withheld' in spec.archive_md
+    assert spec.parent_id == 's001'
+    assert 'work of s003' not in spec.archive_md
+    assert rounds(store)[1]['revisions'][0]['reason'] == 'parent excluded by operator'
+
+
+def test_crash_after_last_confirmation_outcome_reconciles_pool(tmp_path, monkeypatch):
+    from infinievolve.core.rounds import RoundController
+    store, config = setup(tmp_path, width=2, maximum=2,
+                          evaluation={'confirm': {'samples': 1}}, rescore={'a': [1, 20]})
+    config.options['values']['a'][1:3] = [{'value': 4, 'work': b'same'}, {'value': 4, 'work': b'same'}]
+    adapter = Controlled(config)
+    scheduler = Scheduler(store, config, adapter, log=lambda _: None)
+    running = {}
+    scheduler._fill(running)
+    loop, job = running.pop('a/s000')
+    loop.finish(job)
+    scheduler._fill(running)
+    for sid in ('s001', 's002'):
+        loop, job = running.pop('a/' + sid)
+        loop.finish(job)
+    scheduler._fill(running)
+    loop, job = running.pop('a/s001-c1')
+    loop.finish(job)
+    scheduler._fill(running)
+    loop, job = running.pop('a/s002-c1')
+    # Emulate a crash immediately after the final outcome is durable: no pool call.
+    monkeypatch.setattr(loop, 'pool', lambda fingerprint: None)
+    loop.finish(job)
+    assert store.task('a').node('s001').rank_value != store.task('a').node('s002').rank_value
+    state, _ = run(store, config, adapter)
+    assert not state['paused']
+    assert nodes(store)['s001'].rank_value == nodes(store)['s002'].rank_value == 4
+    assert rounds(store)[0]['outcome']['survivors'] == ['s001']
+
+
+def test_switch_to_legacy_after_partial_directory_keeps_ids_monotonic(tmp_path):
+    store, config = setup(tmp_path, width=2, maximum=2)
+    partial = store.task('a').session_dir('s001') / 'input'
+    partial.mkdir(parents=True)
+    (partial / 'prompt.md').write_text('interrupted preparation before spec was written')
+    state, _ = run(store, config)
+    assert not state['paused'] and list(nodes(store)) == ['s000', 's002', 's003']
+    prior_input = (store.task('a').session_dir('s003') / 'input' / 'spec.json').read_bytes()
+    legacy = replace(config, defaults=replace(config.defaults, agents_per_round=1, selection=None, max_sessions=3))
+    adapter = Controlled(legacy)
+    submit = adapter.submit_session
+    def guard(spec, directory, log):
+        assert not (directory / 'node.json').exists(), 'attempt to reuse an archived session ID'
+        return submit(spec, directory, log)
+    adapter.submit_session = guard
+    state, adapter = run(store, legacy, adapter)
+    assert not state['paused'] and state['sessions'] == 3
+    assert [s.session_id for s in adapter.submitted] == ['s004']
+    assert (store.task('a').session_dir('s003') / 'input' / 'spec.json').read_bytes() == prior_input

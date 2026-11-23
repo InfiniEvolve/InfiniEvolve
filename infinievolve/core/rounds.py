@@ -92,7 +92,9 @@ class RoundController:
         record = {"id": f"r{len(previous) + 1:03d}", "policy": config, "created_at": now(),
                   "snapshot": [n.to_dict() for n in nodes], "members": []}
         prior = previous[-1] if previous else None
-        transition = prior is None or any(prior['policy'][k] != config[k] for k in ('selection', 'population_size'))
+        transition = (prior is None or prior['policy']['selection'] != config['selection']
+                      or (config['selection'] == 'genetic'
+                          and prior['policy']['population_size'] != config['population_size']))
         if prior and any(n.index > max(m['index'] for m in prior['members']) and not n.round_id for n in nodes):
             transition = True
         candidates = policies.ordered(nodes, metric)
@@ -104,7 +106,11 @@ class RoundController:
                                     'eligible': [n.session_id for n in candidates]}
         else:
             survivor_ids = prior['outcome']['survivors']
-            population = [n for n in candidates if n.session_id in survivor_ids]
+            # Retention precedes deduplication: an older discarded copy must not
+            # displace the specific individual selected by the preceding round.
+            retained = [n for n in nodes if n.session_id in survivor_ids]
+            population = (policies.unique(retained, metric) if config['selection'] == 'genetic'
+                          else policies.ordered(retained, metric))
         record['population'] = [n.session_id for n in population]
         # Include prepared/void IDs: indices are allocation identities, not budget counters.
         indices = [n.index for n in self.store.nodes()]
@@ -127,10 +133,19 @@ class RoundController:
     def prepare(self, record, member):
         nodes = [Node.from_dict(n) for n in record['snapshot']]
         metric = self.loop.declaration().rank
-        # Honor operator exclusions without letting completed siblings enter the snapshot.
-        excluded = {n.session_id for n in self.store.nodes() if n.excluded}
+        # Refresh operator flags only; keep membership, scores and work frozen.
+        current = {n.session_id: n for n in self.store.nodes()}
+        for node in nodes:
+            if node.session_id in current:
+                node.flags = current[node.session_id].flags
+                node.flags_cleared = current[node.session_id].flags_cleared
+        excluded = {n.session_id for n in nodes if n.excluded}
+        nodes = [n for n in nodes if not n.void]
         if any(sid in excluded and sid != ROOT_ID for sid in member['parent_ids']):
-            pool = [n for n in nodes if n.session_id in record['population'] and n.session_id not in excluded]
+            config = record['policy']
+            pool = (policies.unique(nodes, metric) if config['selection'] == 'genetic'
+                    else policies.ordered(nodes, metric))
+            pool = pool[:config['population_size'] if config['selection'] == 'genetic' else 1]
             old = member.copy()
             revised = policies.parents(record['policy'], pool, metric, self.seed(record, member['session_id']))
             member.update(revised)
@@ -195,6 +210,11 @@ class RoundController:
                 self.loop.check_confirmation(self.store.node(sid), item['reason'], reference_nodes=[])
 
     def complete(self, record):
+        # A confirmation outcome can be durable just before its pooling call.
+        # Reconcile at the barrier on every resume before making survivor choices.
+        fingerprints = {self.store.node(m['session_id']).artifact.get('fingerprint') for m in record['members']}
+        for fingerprint in sorted(f for f in fingerprints if f is not None):
+            self.loop.pool(fingerprint)
         pool_ids = set(record['population']) | {m['session_id'] for m in record['members']}
         pool = [n for n in self.store.nodes() if n.session_id in pool_ids]
         record['outcome'] = policies.choose(record['policy'], pool, self.loop.declaration().rank,

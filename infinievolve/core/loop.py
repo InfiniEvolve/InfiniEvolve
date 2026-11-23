@@ -311,7 +311,7 @@ class TaskLoop:
                 return None
             if prepared is None:
                 self.store.events.emit("stop_check", None, **decision.to_dict())
-                index = len([node for node in nodes if not node.is_root]) + 1
+                index = max((node.index for node in nodes), default=0) + 1
                 spec = self._prepare(index, nodes, ranked, declaration)
             else:
                 spec = self._prepare_again(prepared, nodes, ranked, declaration)
@@ -440,6 +440,8 @@ class TaskLoop:
     def _prepare(self, index: int, nodes: list[Node], ranked: list[Node], declaration: Declaration,
                  *, chosen=None, metadata=None, extra_prompt="") -> SessionSpec:
         sid = session_id(index)
+        if self.store.node(sid) is not None or (self.store.session_dir(sid) / "job.json").exists():
+            raise ValueError(f"cannot prepare {sid}: it is already submitted or archived")
         kind = artifact_kind(declaration.artifact)
         chosen = chosen or selection.select(self.settings.start, ranked, declaration.rank, seed=self.settings.seed,
                                   index=index, sharpness=self.settings.sharpness)

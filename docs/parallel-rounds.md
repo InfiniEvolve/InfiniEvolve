@@ -112,17 +112,21 @@ scores; artifact contents are supplied unchanged.
 - Round settings are pinned for an open round. New settings apply at the next
   boundary. Old prepared sequential sessions finish before entering round mode.
   Disabling rounds first drains an open round.
-- Changing selection policy or effective population size initializes from the
+- Changing selection policy or effective genetic population size initializes from the
   currently eligible full archive, recording that transition. Re-entering rounds
   after sequential sessions also reinitializes. Other policy changes retain the
   previous incumbent/population. Excluding a planned parent revises unsubmitted
-  members from eligible pre-round population members; submitted lineage is retained.
+  members from eligible pre-round snapshot members; submitted lineage is retained.
 
 The existing gap between external job submission and saving its job handle is
 unchanged: this does not promise exactly-once external execution across a crash
 in that gap. Run one scheduler process per campaign, as before.
 
 ## Compatibility and inspection
+
+Preview limitation: `infinievolve check --prompt` shows the base session prompt;
+it does not include the genetic variation section. Inspect the submitted
+`input/prompt.md` for the complete prompt actually delivered to an agent.
 
 Without `strategy.selection` and with `agents_per_round: 1`, the original
 sequential path, including `strategy.start: best|explore|baseline`, is retained.
