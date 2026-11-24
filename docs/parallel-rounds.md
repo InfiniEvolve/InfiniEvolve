@@ -60,7 +60,8 @@ A survivor that is hard-flagged or voided between two rounds gives up its place:
 the next round fills it with the best remaining eligible candidate that does not
 hold the same work (by fingerprint), and records the swap under `refill` in the
 round file. A parent excluded after its round opened is replanned from that
-round's snapshot instead.
+round's snapshot instead. Replacement parents also participate in survivor
+selection alongside the original population and offspring, including after a restart.
 
 ## Genetic selection and variation
 
@@ -106,8 +107,9 @@ scores; artifact contents are supplied unchanged.
   consume budget; void sessions do not. A final round can be shorter.
 - `window_k` still counts sessions. Plateau checks occur at round boundaries;
   reserved members finish even if a partial round would have triggered a stop.
-- Confirmation compares each eligible offspring with the pre-round best, after
-  duplicate-score pooling, in session-index order. All required repeats finish
+- Confirmation compares each eligible offspring with the best pre-round node
+  using its current pooled score and eligibility, in session-index order. The
+  historical inputs sent to agents remain frozen. All required repeats finish
   before survivor selection. This can require more repeats than sequential runs.
 - `task_overrides.<task>.hold: true` prevents additional round member submissions,
   including prepared members. Submitted jobs finish; the open round remains saved.

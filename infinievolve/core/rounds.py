@@ -12,7 +12,8 @@ from .views import current_stop
 
 
 def records(store):
-    return [read_json(p) for p in sorted((store.root / "rounds").glob("r*.json"))]
+    paths = sorted((store.root / "rounds").glob("r*.json"), key=lambda p: int(p.stem[1:]))
+    return [read_json(p) for p in paths]
 
 
 def round_state(store):
@@ -196,13 +197,15 @@ class RoundController:
         return spec
 
     def confirm(self, record):
-        reference = [Node.from_dict(n) for n in record['snapshot']]
         if 'confirmation_plan' not in record:
             # Reconcile pooling even after a crash immediately following node archival.
             fingerprints = {self.store.node(m['session_id']).artifact.get('fingerprint') for m in record['members']}
             for fingerprint in sorted(f for f in fingerprints if f is not None):
                 self.loop.pool(fingerprint)
-            # Compute against the fixed pre-round best, after duplicate pooling, before any confirmations.
+            # Keep pre-round membership, but compare against its current pooled
+            # scores and eligibility. The agents' historical snapshot stays frozen.
+            reference_ids = {n['session_id'] for n in record['snapshot']}
+            reference = [n for n in self.store.nodes() if n.session_id in reference_ids]
             best = selection.best_node(reference, self.loop.declaration().rank)
             metric = self.loop.declaration().rank
             configured = self.loop.declaration().confirm
@@ -227,6 +230,9 @@ class RoundController:
         for fingerprint in sorted(f for f in fingerprints if f is not None):
             self.loop.pool(fingerprint)
         pool_ids = set(record['population']) | {m['session_id'] for m in record['members']}
+        # Replanning can introduce an eligible parent outside the original
+        # population. Its work must compete with its offspring, also on resume.
+        pool_ids.update(sid for m in record['members'] for sid in m['parent_ids'])
         pool = [n for n in self.store.nodes() if n.session_id in pool_ids]
         record['outcome'] = policies.choose(record['policy'], pool, self.loop.declaration().rank,
                                             self.seed(record, 'survivors'))
