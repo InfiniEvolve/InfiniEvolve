@@ -20,7 +20,7 @@ from ..artifacts import artifact_kind
 from ..config import CampaignConfig, TaskSettings
 from . import prompt as prompts
 from . import selection, stopping
-from .adapter import Adapter, AgentUnavailable, HostFault, JobFailed
+from .adapter import Adapter, AgentUnavailable, HostFault, JobFailed, SubmitDeferred
 from .archive import CampaignStore, TaskStore, read_json, sha256_bytes, write_json
 from .events import now, parse_time
 from .schema import AGGREGATES, Declaration, parse_declaration
@@ -90,6 +90,8 @@ class TaskLoop:
         self._hold_reported = False
         self._mismatch_reported = False
         self.unavailable: AgentUnavailable | None = None   # read and cleared by the scheduler
+        self.deferred: SubmitDeferred | None = None        # read and cleared by the scheduler
+        self.waiting = False                               # set by the scheduler while submits are deferred
 
     @property
     def task(self) -> str:
@@ -314,6 +316,9 @@ class TaskLoop:
             self.log(f"[{self.task}/{spec.session_id}] submitted, start from {spec.parent_id or 'baseline'} "
                      f"({spec.start_strategy}); limit {spec.time_limit_seconds // 60} min")
             return job
+        except SubmitDeferred as error:   # not now, on purpose: the scheduler tries again later
+            self.deferred = error
+            return None
         except Exception as error:  # a broken task must not take the other tasks down
             self.pause("submit", error)
             return None
@@ -421,6 +426,8 @@ class TaskLoop:
         spec = self._prepare(int(old["index"]), nodes, ranked, declaration)
         changed = {"prompt_changed": spec.prompt != old_prompt,
                    "parent_changed": spec.parent_id != old.get("parent_id")}
+        if self.waiting and not any(changed.values()):   # another try at a deferred submit: nothing to report
+            return spec
         self.store.events.emit("session_reprepared", sid, previously_prepared_at=old.get("prepared_at"),
                                previous_parent=old.get("parent_id"), parent=spec.parent_id, **changed)
         self.log(f"[{self.task}/{sid}] was prepared but never submitted; prepared again from the current state"
@@ -555,6 +562,7 @@ class TaskLoop:
 
 class Scheduler:
     UNAVAILABLE_WAIT_SECONDS = 900   # retry delay when the agent's service gives no time to come back
+    DEFERRED_WAIT_SECONDS = 300      # retry delay when an adapter defers a submit without saying for how long
 
     def __init__(self, store: CampaignStore, config: CampaignConfig, adapter: Adapter,
                  log: Callable[[str], None] = print, sleep: Callable[[float], None] = time.sleep,
@@ -562,11 +570,13 @@ class Scheduler:
         self.store, self.config, self.adapter, self.log, self.sleep = store, config, adapter, log, sleep
         self.clock = clock
         self.hold_until = 0.0   # the agent's service refused work: submit nothing new before this time
+        self.waiting: dict[str, float] = {}   # task -> when to try a submit its adapter deferred again
         self.tasks = adapter.resolve_tasks(config.tasks)
         self.loops = {task: TaskLoop(store.task(task), config.for_task(task), adapter, log) for task in self.tasks}
 
     def run(self) -> dict:
-        """Run until every task is stopped or paused; returns the campaign state."""
+        """Run until every task is stopped or paused; returns the campaign state. A task whose adapter
+        defers its submits (SubmitDeferred) is neither: the run waits for it."""
         running: dict[str, tuple[TaskLoop, Job]] = {}
         poll_failures, failing_since = 0, None
         for loop in self.loops.values():
@@ -582,6 +592,9 @@ class Scheduler:
                     self.sleep(min(self.hold_until - self.clock(), 300))
                     continue
                 if held:   # the hold ran out between the two clock reads: fill again before concluding
+                    continue
+                if self.waiting:   # nothing runs, but a deferred submit is tried again: wait for it
+                    self.sleep(min(max(min(self.waiting.values()) - self.clock(), 0), 300))
                     continue
                 break
             try:
@@ -633,16 +646,42 @@ class Scheduler:
         for loop in order:
             if len(running) >= self.config.max_parallel:
                 return
-            if loop.task in busy:
+            if loop.task in busy or self.clock() < self.waiting.get(loop.task, 0.0):
                 continue
             job = loop.next_job()
+            if loop.deferred is not None:
+                self._defer(loop)
+            elif loop.task in self.waiting:
+                self._resume(loop, job)
             if job:
                 running[job.key] = (loop, job)
                 busy.add(loop.task)
 
+    def _defer(self, loop: TaskLoop) -> None:
+        """The adapter will not take this task's next job yet: try again later, without pausing the task."""
+        error, loop.deferred = loop.deferred, None
+        wait = self.DEFERRED_WAIT_SECONDS if error.retry_after is None else max(float(error.retry_after), 1.0)
+        if loop.task not in self.waiting:   # one record when the wait starts, not one per try
+            reason = (str(error).splitlines() or [repr(error)])[0][:500]
+            loop.store.events.emit("submit_deferred", None, reason=reason, retry_seconds=wait)
+            self.log(f"[{loop.task}] the adapter defers the next submit ({reason}); waiting, trying again "
+                     f"every {wait / 60:.4g} min")
+        self.waiting[loop.task] = self.clock() + wait
+        loop.waiting = True
+
+    def _resume(self, loop: TaskLoop, job: Job | None) -> None:
+        """A task whose submits were deferred no longer is: it submitted, or has nothing left to submit."""
+        del self.waiting[loop.task]
+        loop.waiting = False
+        if job:
+            loop.store.events.emit("submit_resumed", job.session_id, job_kind=job.kind)
+            self.log(f"[{loop.task}] the adapter takes submits again; {job.session_id} submitted")
+
     def write_state(self) -> dict:
         state = campaign_state(self.store, self.config, self.tasks)
         state["paused"] = {task: loop.paused for task, loop in self.loops.items() if loop.paused}
+        state["waiting"] = {task: time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(until))
+                            for task, until in self.waiting.items()}
         write_json(self.store.root / "state.json", state)
         write_summary(self.store, self.tasks)
         return state

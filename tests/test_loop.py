@@ -8,6 +8,7 @@ import pytest
 from infinievolve import artifacts
 from infinievolve.adapters import make_adapter
 from infinievolve.config import parse_config
+from infinievolve.core.adapter import SubmitDeferred
 from infinievolve.core.archive import CampaignStore
 from infinievolve.core.loop import Scheduler
 
@@ -168,6 +169,38 @@ def test_a_refused_agent_holds_the_campaign_and_the_session_is_resubmitted(tmp_p
     assert adapter.submitted[0].prompt == adapter.submitted[1].prompt
     assert nodes(store)["s001"].rank_value == 2.0
     assert len(events(store, "agent_unavailable")) == 1 and len(events(store, "campaign_hold")) == 1
+
+
+def test_a_deferred_submit_is_tried_again_and_the_run_waits_for_it(tmp_path, monkeypatch):
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 2.0, 2.0], "b": [1.0, 2.0, 2.0, 2.0]})
+    clock, lines = {"now": 0.0}, []
+    gate = {"a": 3, "b": 1}                    # how many more submits each task's gate refuses
+    original = fake_adapter.FakeAdapter.submit_session
+
+    def submit_session(self, spec, session_dir, events):
+        if spec.index == 2 and gate[spec.task]:   # the round gate before each task's second session
+            gate[spec.task] -= 1
+            raise SubmitDeferred("round 2 waits for the operator", retry_after=600 if spec.task == "a" else None)
+        return original(self, spec, session_dir, events)
+    monkeypatch.setattr(fake_adapter.FakeAdapter, "submit_session", submit_session)
+
+    def sleep(seconds):
+        clock["now"] += max(seconds, 1.0)
+
+    adapter = make_adapter(config)
+    state = Scheduler(store, config, adapter, log=lines.append, sleep=sleep, clock=lambda: clock["now"]).run()
+    assert not state["paused"] and not state["waiting"]                   # it did not give up on the gate
+    assert state["tasks"]["a"]["stopped"] and state["tasks"]["b"]["stopped"]
+    assert clock["now"] >= 3 * 600                                       # a: three refusals, 10 min apart
+    assert [spec.session_id for spec in adapter.submitted if spec.task == "a"] == ["s001", "s002", "s003"]
+    for task in ("a", "b"):                                               # one record when the wait starts and ends
+        task_events = store.events.for_task(task)
+        assert [e["type"] for e in task_events.read() if e["type"].startswith("submit_")] \
+            == ["submit_deferred", "submit_resumed"]
+        assert not [e for e in task_events.read() if e["type"] in ("task_paused", "session_reprepared")]
+    assert [e["data"]["retry_seconds"] for e in events(store, "submit_deferred")] == [600, 300]
+    assert sum("defers the next submit" in line for line in lines) == 2
+    assert sum("takes submits again" in line for line in lines) == 2
 
 
 def test_a_failed_job_pauses_the_task_and_the_next_run_resubmits_it(tmp_path):

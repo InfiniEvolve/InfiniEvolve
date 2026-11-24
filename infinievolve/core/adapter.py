@@ -44,6 +44,21 @@ class HostFault(JobFailed):
     """
 
 
+class SubmitDeferred(RuntimeError):
+    """The adapter will not take this task's next job yet, on purpose, and expects to later: a round gate
+    that waits for an operator, a quota window, a reservation that has not started.
+
+    Raise it from submit_baseline, submit_session or submit_rescore. The task is not paused and the
+    scheduler does not exit: it tries the same submit again after retry_after seconds (None = the
+    scheduler's default wait) while the other tasks go on. A session that was prepared stays prepared and
+    is prepared again from the current state when the submit is tried again.
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True)
 class PromptText:
     """The task-specific sentences of the session prompt. Every one has a default."""
@@ -88,7 +103,9 @@ class Adapter(Protocol):
         """Start scoring the unmodified baseline (the root node s000); return the job handle."""
 
     def submit_session(self, spec: SessionSpec, session_dir: Path, events: EventLog) -> dict:
-        """Start one agent session; its inputs are already under session_dir/input. Return the job handle."""
+        """Start one agent session; its inputs are already under session_dir/input. Return the job handle.
+
+        Raise SubmitDeferred to hold the task back until a gate opens; any other error pauses the task."""
 
     def poll(self, jobs: list[Job], events: EventLog) -> set[str]:
         """Keys (Job.key) of the jobs that have finished, given all jobs in flight."""

@@ -184,7 +184,13 @@ SessionResult(
 失败尝试的任何残留都不能被误当成它的结果。
 
 `collect` 抛出的其他异常一律视为"没取回来"：任务暂停，作业记录保留，下一次 `run` 会再次收集。
-`submit_*` 方法抛出的异常会在记录任何内容之前暂停任务。
+`submit_*` 方法抛出的异常会在记录任何内容之前暂停任务，`SubmitDeferred` 除外。
+
+提交（`submit_baseline`、`submit_session`、`submit_rescore`）可以有意拒绝：任务的下一个作业要等
+campaign 之外的事情，比如由操作者打开的轮次闸门、配额窗口。这时抛出
+`SubmitDeferred(message, retry_after=None)`。任务不会暂停，`run` 在等待期间也不会退出：每隔
+`retry_after` 秒（为 `None` 时 5 分钟）再试同一次提交，其他任务照常进行；`submit_deferred` /
+`submit_resumed` 事件记录等待的开始和结束。
 
 被 agent 提前结束的会话，或产出了无效成果的会话，都不算失败：照常返回它的结果。
 

@@ -199,7 +199,14 @@ resubmitted with the same inputs, and nothing of a failed attempt may be mistake
 
 Any other exception from `collect` is taken as "could not fetch": the task pauses, the job stays
 recorded, and the next `run` collects it again. An exception from a `submit_*` method pauses the task
-before anything is recorded.
+before anything is recorded, except `SubmitDeferred`.
+
+A submit (`submit_baseline`, `submit_session`, `submit_rescore`) may refuse on purpose, when the task's
+next job must wait for something outside the campaign: a round gate an operator opens, a quota window.
+Raise `SubmitDeferred(message, retry_after=None)` then. The task is not paused and `run` does not exit
+while it waits: the same submit is tried again every `retry_after` seconds (5 minutes when `None`) while
+the other tasks go on, and `submit_deferred` / `submit_resumed` events mark when the wait starts and
+ends. Any other exception from a submit pauses the task until the next `run`.
 
 A session the agent cut short, or that produced invalid work, is not a failure: return its result.
 

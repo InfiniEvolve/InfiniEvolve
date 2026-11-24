@@ -11,7 +11,8 @@ TYPES = ("campaign_init", "campaign_stop", "campaign_hold", "task_reset", "task_
          "session_reprepared",
          "job_submitted", "job_started", "job_finished", "collected", "archived", "stop_check", "error",
          "poll_recovered", "agent_unavailable", "host_fault", "flagged", "flags_cleared",
-         "confirmation_needed", "confirmation_sample", "rescored", "job_held", "host_excluded")
+         "confirmation_needed", "confirmation_sample", "rescored", "job_held", "host_excluded",
+         "submit_deferred", "submit_resumed")
 # An adapter may also record events of its own under any name with this prefix.
 ADAPTER_PREFIX = "adapter_"
 
