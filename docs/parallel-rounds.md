@@ -56,6 +56,12 @@ job completion order; model outputs themselves are not deterministic.
 If no candidate is eligible, the next round starts from the baseline. A task
 with an invalid baseline can therefore still search for its first valid result.
 
+A survivor that is hard-flagged or voided between two rounds gives up its place:
+the next round fills it with the best remaining eligible candidate that does not
+hold the same work (by fingerprint), and records the swap under `refill` in the
+round file. A parent excluded after its round opened is replanned from that
+round's snapshot instead.
+
 ## Genetic selection and variation
 
 ```yaml

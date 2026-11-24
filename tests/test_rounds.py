@@ -350,3 +350,37 @@ def test_switch_to_legacy_after_partial_directory_keeps_ids_monotonic(tmp_path):
     assert not state['paused'] and state['sessions'] == 3
     assert [s.session_id for s in adapter.submitted] == ['s004']
     assert (store.task('a').session_dir('s003') / 'input' / 'spec.json').read_bytes() == prior_input
+
+
+@pytest.mark.parametrize('level', ['hard', 'void'])
+def test_incumbent_excluded_between_rounds_is_replaced_by_the_next_best(tmp_path, level):
+    store, config = setup(tmp_path, width=2, maximum=2)
+    run(store, config)
+    assert rounds(store)[0]['outcome']['survivors'] == ['s002']
+    node = store.task('a').node('s002')
+    node.flags['manual'] = {'level': level, 'note': 'checked by hand'}
+    store.task('a').update_node(node)
+    config = replace(config, defaults=replace(config.defaults, max_sessions=4))
+    state, adapter = run(store, config)
+    assert not state['paused']
+    assert [s.parent_id for s in adapter.submitted][:2] == ['s001', 's001']   # not back to the baseline
+    assert rounds(store)[1]['refill'] == {'excluded': ['s002'], 'added': ['s001']}
+
+
+def test_excluded_genetic_survivor_is_replaced_but_never_by_a_copy_of_its_work(tmp_path):
+    store, config = setup(tmp_path, width=3, maximum=3, selection='genetic')
+    config = replace(config, defaults=replace(config.defaults, population_size=2, elite_count=2))
+    config.options['values']['a'][:4] = [1, {'value': 5, 'work': b'B'}, {'value': 4, 'work': b'C'},
+                                        {'value': 3, 'work': b'B'}]       # s003 is a copy of s001's work
+    run(store, config)
+    assert rounds(store)[0]['outcome']['survivors'] == ['s001', 's002']
+    node = store.task('a').node('s001')
+    node.flags['manual'] = {'level': 'hard', 'note': 'checked by hand'}
+    store.task('a').update_node(node)
+    config = replace(config, defaults=replace(config.defaults, max_sessions=5))
+    state, _ = run(store, config)
+    assert not state['paused']
+    second = rounds(store)[1]
+    assert second['refill'] == {'excluded': ['s001'], 'added': ['s000']}
+    assert second['population'] == ['s002', 's000']
+    assert all(sid in ('s000', 's002') for m in second['members'] for sid in m['parent_ids'])

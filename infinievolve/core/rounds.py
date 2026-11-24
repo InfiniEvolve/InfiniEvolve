@@ -111,6 +111,17 @@ class RoundController:
             retained = [n for n in nodes if n.session_id in survivor_ids]
             population = (policies.unique(retained, metric) if config['selection'] == 'genetic'
                           else policies.ordered(retained, metric))
+            # A survivor excluded since the boundary (a hard flag, a void) leaves its place empty: fill it
+            # from the best remaining candidates, as a transition would, never with a copy of its work.
+            kept = {n.session_id for n in population}
+            lost = [self.store.node(sid) for sid in survivor_ids if sid not in kept]
+            if lost:
+                key = lambda n: n.artifact.get('fingerprint') or n.session_id
+                taken = {key(n) for n in population + lost}
+                refill = [n for n in candidates if key(n) not in taken][:len(lost)]
+                population = population + refill
+                record['refill'] = {'excluded': [n.session_id for n in lost],
+                                    'added': [n.session_id for n in refill]}
         record['population'] = [n.session_id for n in population]
         # Include prepared/void IDs: indices are allocation identities, not budget counters.
         indices = [n.index for n in self.store.nodes()]
