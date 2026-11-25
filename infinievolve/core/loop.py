@@ -1,13 +1,9 @@
-"""Campaign scheduler: one lineage per task, tasks running in parallel.
+"""Campaign scheduler: sequential sessions by default, optional parallel rounds per task.
 
-Per task: score the baseline (s000), then repeatedly stop check -> choose a start node -> render the
-prompt and the archive -> submit the session -> archive its best valid scored version. Sessions of one
-task are sequential (each one reads the archive of the previous ones); different tasks run concurrently,
-up to campaign.max_parallel jobs in flight.
-
-Restart safety: a session's inputs are written under sessions/<sid>/input before submission and its job
-under sessions/<sid>/job.json after; a restarted scheduler re-attaches to submitted jobs and resubmits
-prepared-but-unsubmitted sessions with the same parent and prompt.
+The global max_parallel limits all jobs. RoundController persists cohort snapshots,
+parent plans and barriers; the legacy one-agent path retains existing behavior.
+Never-submitted inputs are refreshed from current instructions on resume. Submitted
+jobs reattach to their saved handles and retain their original inputs.
 """
 from __future__ import annotations
 
@@ -21,6 +17,7 @@ from ..config import CampaignConfig, TaskSettings
 from . import prompt as prompts
 from . import selection, stopping
 from .adapter import Adapter, AgentUnavailable, HostFault, JobFailed, SubmitDeferred
+from .rounds import RoundController, round_state
 from .archive import CampaignStore, TaskStore, read_json, sha256_bytes, write_json
 from .events import now, parse_time
 from .schema import AGGREGATES, Declaration, parse_declaration
@@ -60,6 +57,7 @@ def task_state(store: TaskStore, settings: TaskSettings) -> dict:
         "sessions": len([node for node in nodes if not node.is_root]),
         "best_session": best.session_id if best else None, "best": best.rank_value if best else None,
         "best_curve": stopping.best_curve(nodes, declaration.rank) if declaration else [],
+        "round": round_state(store),
         "in_flight": store.in_flight(), "stopped": stop_event is not None,
         "stop_reason": stop_event["data"].get("reason") if stop_event else None,
         "last_pause": paused["data"].get("message") if paused else None,
@@ -142,7 +140,7 @@ class TaskLoop:
         return jobs
 
     # -- confirming a new best ---------------------------------------------------------
-    def check_confirmation(self, node: Node, distrusted: str | None = None) -> None:
+    def check_confirmation(self, node: Node, distrusted: str | None = None, reference_nodes=None) -> None:
         """Score a node's work again where one scoring is not enough: a new best of a task that declares
         `confirm` (one lucky measurement must not become the start of every later session), and any
         measurement its adapter does not trust. The node is then ranked by the aggregate."""
@@ -153,7 +151,8 @@ class TaskLoop:
         if distrusted:
             samples, why = max(2, confirm.samples if confirm else 2), f"its measurement is not trusted: {distrusted}"
         elif confirm and not node.is_root and metric.usable(node.rank_value):
-            others = [other for other in self.ranked(self.store.nodes()) if other.session_id != node.session_id]
+            others = [other for other in (self.ranked(self.store.nodes()) if reference_nodes is None else reference_nodes)
+                      if other.session_id != node.session_id]
             best = selection.best_node(others, metric)
             if best is not None and not metric.better(node.rank_value, best.rank_value):
                 return
@@ -274,6 +273,11 @@ class TaskLoop:
         if self.paused or self.stopped:
             return None
         try:
+            rounds = RoundController(self)
+            if rounds.active() is not None:
+                return rounds.next_job()
+            if self.store.in_flight():
+                return None
             if self._confirm_running():
                 return None                    # rank only once the new best was scored again
             confirming = self.pending_confirmation()
@@ -286,6 +290,8 @@ class TaskLoop:
             if problem:
                 raise RuntimeError(f"the baseline result points to a broken environment ({problem}); "
                                    f"fix it, then reset the task {self.task}")
+            if rounds.enabled and self._prepared_session() is None:
+                return rounds.next_job()
             declaration = self.declaration()
             nodes = self.store.nodes()
             ranked = self.ranked(nodes)
@@ -307,7 +313,7 @@ class TaskLoop:
                 return None
             if prepared is None:
                 self.store.events.emit("stop_check", None, **decision.to_dict())
-                index = len([node for node in nodes if not node.is_root]) + 1
+                index = max((node.index for node in nodes), default=0) + 1
                 spec = self._prepare(index, nodes, ranked, declaration)
             else:
                 spec = self._prepare_again(prepared, nodes, ranked, declaration)
@@ -362,6 +368,8 @@ class TaskLoop:
                 spec = SessionSpec(self.task, ROOT_ID, 0, None, "root", 0, "", "", None)
             else:
                 spec = self._load_spec(job.session_id)
+            if spec.round_id:
+                write_json(directory / "remeasure.json", {"reason": result.remeasure})
             node = self._archive(spec, result, prepared_at=read_json(directory / "input" / "spec.json")["prepared_at"])
         except Exception as error:
             self.pause("archive", error)
@@ -372,7 +380,8 @@ class TaskLoop:
         if "duplicate" in node.flags:   # the same work measured once more: all its copies share what was measured
             self.pool(node.artifact.get("fingerprint"))
             node = self.store.node(node.session_id)
-        self.check_confirmation(node, distrusted=result.remeasure)
+        if not node.round_id:
+            self.check_confirmation(node, distrusted=result.remeasure)
         return node
 
     def pause(self, where: str, error: Exception) -> None:
@@ -435,10 +444,13 @@ class TaskLoop:
                     if any(changed.values()) else ""))
         return spec
 
-    def _prepare(self, index: int, nodes: list[Node], ranked: list[Node], declaration: Declaration) -> SessionSpec:
+    def _prepare(self, index: int, nodes: list[Node], ranked: list[Node], declaration: Declaration,
+                 *, chosen=None, metadata=None, extra_prompt="") -> SessionSpec:
         sid = session_id(index)
+        if self.store.node(sid) is not None or (self.store.session_dir(sid) / "job.json").exists():
+            raise ValueError(f"cannot prepare {sid}: it is already submitted or archived")
         kind = artifact_kind(declaration.artifact)
-        chosen = selection.select(self.settings.start, ranked, declaration.rank, seed=self.settings.seed,
+        chosen = chosen or selection.select(self.settings.start, ranked, declaration.rank, seed=self.settings.seed,
                                   index=index, sharpness=self.settings.sharpness)
         parent = next((node for node in nodes if node.session_id == chosen.parent_id), None)
         start = self.store.artifact(parent.session_id) if parent and not parent.is_root else b""
@@ -448,10 +460,16 @@ class TaskLoop:
             declaration=declaration, parent=parent, nodes=ranked, carry=carry,
             report_chars=self.settings.report_chars, location=self.adapter.archive_location,
             hidden=self.settings.hide_scores, rules=self.settings.prompt_rules)
+        text += extra_prompt
         archive_md = (prompts.archive_markdown(self.store, ranked, declaration, self.settings.hide_scores,
                                                with_work=carry == "full") if carry != "none" else "")
         directory = self.store.session_dir(sid) / "input"
         directory.mkdir(parents=True, exist_ok=True)
+        # Also used for never-submitted round members: remove stale optional inputs.
+        (directory / "spec.json").unlink(missing_ok=True)
+        for pattern in ("start.*", "reference.*", "archive.md"):
+            for path in directory.glob(pattern):
+                path.unlink()
         (directory / "prompt.md").write_text(text)
         if carry != "none":   # the file exists from the first session on, so an adapter can always mount it
             (directory / "archive.md").write_text(archive_md)
@@ -465,11 +483,11 @@ class TaskLoop:
         # spec.json last: its presence marks the session as prepared
         write_json(directory / "spec.json", {
             "task": self.task, "session_id": sid, "index": index, "parent_id": chosen.parent_id,
-            "start_strategy": self.settings.start, "time_limit_seconds": self.time_limit_seconds(),
+            "start_strategy": chosen.strategy, "time_limit_seconds": self.time_limit_seconds(),
             "time_limit_source": "config" if self.settings.session_minutes is not None else "task",
             "agent": self.settings.agent, "start_file": f"start{kind.suffix}" if start else None,
             "start_sha256": sha256_bytes(start) if start else None, "reference_id": reference,
-            "prepared_at": now()})
+            "prepared_at": now(), **(metadata or {})})
         return self._load_spec(sid)
 
     def _write_reference(self, directory: Path, ranked: list[Node], declaration: Declaration) -> str | None:
@@ -490,7 +508,8 @@ class TaskLoop:
         return SessionSpec(self.task, sid, data["index"], data["parent_id"], data["start_strategy"],
                            data["time_limit_seconds"], (directory / "prompt.md").read_text(),
                            archive.read_text() if archive.is_file() else "",   # absent when nothing is carried
-                           start.read_bytes() if start else None)
+                           start.read_bytes() if start else None, data.get("round_id"),
+                           data.get("parent_ids", []), data.get("variation", {}))
 
     def _archive(self, spec: SessionSpec, result: SessionResult, *, prepared_at: str) -> Node:
         declaration = self.declaration()
@@ -532,7 +551,7 @@ class TaskLoop:
             stats=result.stats, flags=flags,
             error=result.error or (f"passes the checks, but has no usable {metric.name} value (not a starting point)"
                                    if best is not None and value is None else None),
-            archived_at=now())
+            archived_at=now(), round_id=spec.round_id, parent_ids=spec.parent_ids, variation=spec.variation)
         self.store.archive_node(node, data, kind.suffix)
         if is_root and not self.store.meta_path.is_file():
             write_json(self.store.meta_path, {"declaration": declaration.to_dict(), "pinned_at": now()})
@@ -638,24 +657,27 @@ class Scheduler:
     def _fill(self, running: dict[str, tuple[TaskLoop, Job]]) -> None:
         if self.clock() < self.hold_until:
             return
-        busy = {loop.task for loop, _ in running.values()}
-        # pending confirmations first (short, and they hold their task back), then the tasks with the
-        # fewest archived nodes, so all tasks advance evenly
-        order = sorted(self.loops.values(),
-                       key=lambda loop: (loop.pending_confirmation() is None, len(loop.store.nodes()), loop.task))
-        for loop in order:
-            if len(running) >= self.config.max_parallel:
+        # One slot per task per pass; repeat to fill rounds without starving other tasks.
+        while len(running) < self.config.max_parallel:
+            progress = False
+            counts = {task: sum(loop.task == task for loop, _ in running.values()) for task in self.tasks}
+            order = sorted(self.loops.values(), key=lambda loop: (
+                loop.pending_confirmation() is None, counts[loop.task], len(loop.store.nodes()), loop.task))
+            for loop in order:
+                if len(running) >= self.config.max_parallel:
+                    return
+                if self.clock() < self.waiting.get(loop.task, 0.0):
+                    continue
+                job = loop.next_job()
+                if loop.deferred is not None:
+                    self._defer(loop)
+                elif loop.task in self.waiting:
+                    self._resume(loop, job)
+                if job:
+                    running[job.key] = (loop, job)
+                    progress = True
+            if not progress:
                 return
-            if loop.task in busy or self.clock() < self.waiting.get(loop.task, 0.0):
-                continue
-            job = loop.next_job()
-            if loop.deferred is not None:
-                self._defer(loop)
-            elif loop.task in self.waiting:
-                self._resume(loop, job)
-            if job:
-                running[job.key] = (loop, job)
-                busy.add(loop.task)
 
     def _defer(self, loop: TaskLoop) -> None:
         """The adapter will not take this task's next job yet: try again later, without pausing the task."""

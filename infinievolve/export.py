@@ -21,7 +21,9 @@ def lineage(store: TaskStore) -> dict:
     declaration = store.declaration()
     nodes = store.nodes()
     return {"task": store.name, "rank_by": declaration.rank_by if declaration else None,
-            "nodes": [{"id": node.session_id, "parent": node.parent_id, "valid": node.valid,
+            "nodes": [{"id": node.session_id, "parent": node.parent_id,
+                       "parents": node.parent_ids or ([node.parent_id] if node.parent_id else []),
+                       "round": node.round_id, "variation": node.variation, "valid": node.valid,
                        "value": node.rank_value, "excluded": node.excluded,
                        "text": declaration.rank.text(node.rank_value) if declaration else "-"} for node in nodes]}
 
@@ -31,7 +33,8 @@ def dot(graph: dict) -> str:
     for node in graph["nodes"]:
         style = ', style="dashed"' if not node["valid"] or node["excluded"] else ""
         lines.append(f'  {node["id"]} [label="{node["id"]}\\n{node["text"]}"{style}];')
-    lines += [f'  {node["parent"]} -> {node["id"]};' for node in graph["nodes"] if node["parent"]]
+    lines += [f'  {parent} -> {node["id"]};' for node in graph["nodes"]
+              for parent in node.get("parents", [node["parent"]] if node["parent"] else [])]
     return "\n".join(lines + ["}"]) + "\n"
 
 
@@ -39,7 +42,8 @@ def mermaid(graph: dict) -> str:
     lines = ["graph LR"]
     for node in graph["nodes"]:
         lines.append(f'  {node["id"]}["{node["id"]}<br/>{node["text"]}"]')
-    lines += [f'  {node["parent"]} --> {node["id"]}' for node in graph["nodes"] if node["parent"]]
+    lines += [f'  {parent} --> {node["id"]}' for node in graph["nodes"]
+              for parent in node.get("parents", [node["parent"]] if node["parent"] else [])]
     return "\n".join(lines) + "\n"
 
 
@@ -73,6 +77,8 @@ def export(store: CampaignStore, tasks: list[str]) -> Path:
                 if reference and node.valid else None,
                 "task": task, "session": node.session_id, "index": node.index, "parent": node.parent_id,
                 "start": node.start_strategy, "scored": node.chosen_label, "valid": node.valid,
+                "round_id": node.round_id, "parent_ids": json.dumps(node.parent_ids),
+                "variation": json.dumps(node.variation, sort_keys=True),
                 "rank_metric": node.rank_metric, "rank_value": node.rank_value,
                 **{name: metric_value(node, name) for name in declaration.metrics},
                 "flags": json.dumps({name: flag.get("level") for name, flag in node.flags.items()}, sort_keys=True),
@@ -94,7 +100,7 @@ def export(store: CampaignStore, tasks: list[str]) -> Path:
             session = "start" if place == 0 else [node for node in real if not node.is_root][place - 1].session_id
             best_rows.append({"task": task, "sessions": place, "session": session, "best": value})
     fixed = ["task", "session", "index", "parent", "start", "scored", "valid", "rank_metric", "rank_value",
-             "reference", "vs_reference"]
+             "reference", "vs_reference", "round_id", "parent_ids", "variation"]
     tail = ["flags", "flags_cleared", "void", "excluded", "artifact_kind", "artifact_fingerprint", "agent",
             "agent_seconds", "wall_seconds", "usage", "error", "archived_at"]
     write_csv(out / "nodes.csv", node_rows, fixed + metric_names + tail)

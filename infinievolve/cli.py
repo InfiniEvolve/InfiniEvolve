@@ -156,6 +156,9 @@ def cmd_check(args) -> int:
                   f"{declaration.confirm.aggregate}")
         print(f"  sessions     at most {settings.max_sessions}; stops earlier when the last {settings.window_k} "
               f"bring no gain above {settings.min_improvement:g}{unit}")
+        if settings.selection is not None or settings.agents_per_round > 1:
+            print(f"  rounds       {settings.agents_per_round} agents; selection {settings.selection or 'greedy'}; "
+                  f"global job cap {config.max_parallel}")
         print(f"  start        {settings.start}; inherits: {settings.carry}; limit {limit / 60:g} min per session")
         print(f"  agent        {getattr(adapter, 'task_agent', lambda task: settings.agent)(task)}")
         if args.prompt:

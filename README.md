@@ -36,6 +36,18 @@ ends with the summary:
 | golf | bytes | 8 | 8 | s000 466 | 163 | -303 | s005 | 0.00 | best 163 within 0.0 of 163 over the last 3 sessions |
 ```
 
+## Parallel agents for one task
+
+Set `campaign.agents_per_round` in a run's `config.yaml` to generate several
+candidates per round (default **1**). `campaign.max_parallel` remains the global
+job limit. Choose `strategy.selection: greedy`, `probabilistic`, or `genetic`.
+The next round waits for all candidates and required repeat scoring. Genetic
+mode maintains a population and asks each agent to combine selected parent
+artifacts and optionally mutate the result, using the task's original evaluator.
+
+See [configuration, selection semantics and restart behavior](docs/parallel-rounds.md).
+Existing configurations retain their sequential behavior.
+
 ## What you get
 
 Everything a run produces is in its own directory: `<task>/runs/<name>/` for a task directory, the
