@@ -310,3 +310,87 @@ def test_a_session_the_adapter_refused_is_prepared_again_from_the_current_state(
     assert not (inputs / "reference.txt").exists()      # nothing of the old preparation is handed on
     [event] = events(store, "session_reprepared")
     assert event["session_id"] == "s001" and event["data"]["prompt_changed"] is True
+
+
+class Crash(BaseException):
+    """The process dies: no `except Exception` in the scheduler catches it."""
+
+
+def crash_at(monkeypatch, name, *, after=False):
+    """Kill the run once, at the scheduler's first write of a file called `name` (just before it, or just
+    after it with `after`)."""
+    from infinievolve.core import loop
+    write = loop.write_json
+    fired = []
+
+    def crashing(path, data):
+        if path.name == name and not fired:
+            fired.append(path)
+            if after:
+                write(path, data)
+            raise Crash(str(path))
+        return write(path, data)
+    monkeypatch.setattr(loop, "write_json", crashing)
+    return fired
+
+
+@pytest.mark.parametrize("after", [False, True], ids=["before-needed", "after-needed"])
+def test_a_crash_right_after_archiving_a_new_best_does_not_skip_its_confirmation(tmp_path, monkeypatch, after):
+    store, config = campaign(tmp_path, {"a": [1.0, 4.0, 2.5, 2.5]}, rescore={"a": [2.0, 3.0]},
+                             evaluation={"confirm": {"samples": 2, "aggregate": "median"}})
+    fired = crash_at(monkeypatch, "needed.json", after=after)
+    with pytest.raises(Crash):
+        run(store, config)
+    s001 = tmp_path / "tasks" / "a" / "sessions" / "s001"
+    assert fired and (s001 / "node.json").is_file() and (s001 / "settle.json").is_file()
+
+    state, adapter = run(store, config)
+    archived = nodes(store)
+    assert adapter.rescored == {"a": 2}                 # scored again, and only as often as declared
+    assert archived["s001"].rank_value == 3.0 and state["tasks"]["a"]["best"] == 3.0
+    assert not (s001 / "settle.json").exists() and (s001 / "confirm" / "outcome.json").is_file()
+    kinds = [(event["type"], event["session_id"]) for event in store.events.read()]
+    assert kinds.index(("rescored", "s001")) < kinds.index(("selection", "s002"))   # trusted before used
+    assert "settle.json" not in json.loads((s001 / "manifest.json").read_text())
+
+
+def test_a_crash_between_archiving_the_baseline_and_pinning_the_declaration(tmp_path, monkeypatch):
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0]}, stop={"max_sessions": 2})
+    crash_at(monkeypatch, "task.json")
+    with pytest.raises(Crash):
+        run(store, config)
+    assert nodes(store) == {}                           # the declaration is pinned before the baseline is archived
+    monkeypatch.undo()
+    state, _ = run(store, config)
+    assert list(nodes(store)) == ["s000", "s001", "s002"] and state["tasks"]["a"]["stopped"]
+
+
+def test_a_lineage_left_without_its_declaration_is_repaired(tmp_path, monkeypatch):
+    # an earlier version pinned task.json after archiving the baseline; a crash between the two left this
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0]}, stop={"max_sessions": 2})
+    crash_at(monkeypatch, "selection.json")             # s001 is prepared after the baseline is archived
+    with pytest.raises(Crash):
+        run(store, config)
+    monkeypatch.undo()
+    (tmp_path / "tasks" / "a" / "task.json").unlink()
+    assert "s000" in nodes(store)
+
+    state, _ = run(store, config)
+    assert not state["paused"]
+    assert list(nodes(store)) == ["s000", "s001", "s002"] and state["tasks"]["a"]["stopped"]
+    assert json.loads((tmp_path / "tasks" / "a" / "task.json").read_text())["declaration"]["rank_by"] == "score"
+
+
+def test_a_crash_after_the_last_repeat_scoring_does_not_add_another(tmp_path, monkeypatch):
+    store, config = campaign(tmp_path, {"a": [1.0, 4.0, 2.5, 2.5]}, rescore={"a": [2.0, 3.0, 9.0]},
+                             evaluation={"confirm": {"samples": 2, "aggregate": "median"}})
+    crash_at(monkeypatch, "outcome.json")
+    with pytest.raises(Crash):
+        run(store, config)
+    confirm = tmp_path / "tasks" / "a" / "sessions" / "s001" / "confirm"
+    assert len(list(confirm.glob("r*/sample.json"))) == 2 and not (confirm / "outcome.json").exists()
+
+    state, adapter = run(store, config)
+    assert adapter.rescored == {}                       # both repeat scorings were in: none more
+    assert json.loads((confirm / "outcome.json").read_text())["values"] == [4.0, 2.0, 3.0]
+    assert nodes(store)["s001"].rank_value == 3.0 and state["tasks"]["a"]["best"] == 3.0

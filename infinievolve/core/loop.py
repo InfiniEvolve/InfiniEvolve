@@ -230,7 +230,7 @@ class TaskLoop:
         sid, attempt = job.session_id.rsplit("-c", 1)
         directory = self.store.session_dir(sid) / "confirm"
         declaration = self.declaration()
-        metric, confirm = declaration.rank, declaration.confirm
+        metric = declaration.rank
         result = self.adapter.collect(job, directory / f"r{attempt}", self.store.events)
         row = result.scores[0] if result.scores else None
         valid = bool(row) and declaration.valid(row.checks)
@@ -239,6 +239,13 @@ class TaskLoop:
         write_json(directory / f"r{attempt}" / "sample.json", sample)
         self.store.events.emit("confirmation_sample", sid, attempt=int(attempt), **sample)
         self.log(f"[{self.task}/{sid}] confirmation {attempt}: {metric.text(value)}")
+        self._complete_confirmation(sid)
+
+    def _complete_confirmation(self, sid: str) -> None:
+        """Once every repeat scoring is in, rank the node by the aggregate (repeatable after a crash)."""
+        directory = self.store.session_dir(sid) / "confirm"
+        declaration = self.declaration()
+        metric, confirm = declaration.rank, declaration.confirm
         needed = read_json(directory / "needed.json")
         samples = [read_json(path) for path in sorted(directory.glob("r*/sample.json"))]
         if len(samples) < needed["samples"]:
@@ -365,6 +372,8 @@ class TaskLoop:
                 spec = self._load_spec(job.session_id)
             if spec.round_id:
                 write_json(directory / "remeasure.json", {"reason": result.remeasure})
+            # before node.json: a crash after archiving leaves this, and the next run settles the node
+            write_json(directory / self.SETTLE, {"remeasure": result.remeasure})
             node = self._archive(spec, result, prepared_at=read_json(directory / "input" / "spec.json")["prepared_at"])
         except Exception as error:
             self.pause("archive", error)
@@ -372,12 +381,35 @@ class TaskLoop:
         if job.kind == "baseline":
             self.store.events.emit("baseline_scored", ROOT_ID, value=node.rank_value, valid=node.valid)
         self.log(self._summary(node))
+        return self._settle(node, result.remeasure)
+
+    SETTLE = "settle.json"   # in a session directory: archived, but not yet pooled and checked for confirmation
+
+    def _settle(self, node: Node, remeasure: str | None) -> Node:
+        """What follows archiving a session; repeatable, so that a run can finish it after a crash."""
         if "duplicate" in node.flags:   # the same work measured once more: all its copies share what was measured
             self.pool(node.artifact.get("fingerprint"))
             node = self.store.node(node.session_id)
-        if not node.round_id:
-            self.check_confirmation(node, distrusted=result.remeasure)
+        directory = self.store.session_dir(node.session_id)
+        if not node.round_id and not (directory / "confirm" / "needed.json").is_file():
+            self.check_confirmation(node, distrusted=remeasure)
+        (directory / self.SETTLE).unlink(missing_ok=True)
         return node
+
+    def recover(self) -> None:
+        """Finish what a crash interrupted: pin the declaration of a lineage whose baseline is archived,
+        settle every session archived but not settled, and rank a node whose repeat scorings are all in."""
+        try:
+            if not self.store.meta_path.is_file() and self.store.node(ROOT_ID) is not None:
+                self._pin(self.configured_declaration())
+            for marker in sorted((self.store.root / "sessions").glob(f"*/{self.SETTLE}")):
+                node = self.store.node(marker.parent.name)
+                if node is not None:   # otherwise its job is collected again and finish settles it
+                    self._settle(node, read_json(marker).get("remeasure"))
+            for directory in self._confirm_dirs():   # all repeat scorings in, but not yet folded into the rank
+                self._complete_confirmation(directory.parent.name)
+        except Exception as error:
+            self.pause("recover", error)
 
     def pause(self, where: str, error: Exception) -> None:
         self.paused = f"{where}: {error}"
@@ -545,10 +577,9 @@ class TaskLoop:
             error=result.error or (f"passes the checks, but has no usable {metric.name} value (not a starting point)"
                                    if best is not None and value is None else None),
             archived_at=now(), round_id=spec.round_id, parent_ids=spec.parent_ids, variation=spec.variation)
+        if is_root and not self.store.meta_path.is_file():   # first: an archived baseline needs it
+            self._pin(declaration)
         self.store.archive_node(node, data, kind.suffix)
-        if is_root and not self.store.meta_path.is_file():
-            write_json(self.store.meta_path, {"declaration": declaration.to_dict(), "pinned_at": now()})
-            self.store.events.emit("declaration_pinned", None, declaration=declaration.to_dict())
         self.store.write_manifest(spec.session_id)
         self.store.events.emit("archived", spec.session_id, chosen_label=label, value=node.rank_value,
                                valid=node.valid, timing=timing)
@@ -558,6 +589,10 @@ class TaskLoop:
             self.log(f"[{self.task}/{spec.session_id}] flagged {name} ({flag['level']}): {flag['note']}")
         write_matrix(self.store)
         return node
+
+    def _pin(self, declaration: Declaration) -> None:
+        write_json(self.store.meta_path, {"declaration": declaration.to_dict(), "pinned_at": now()})
+        self.store.events.emit("declaration_pinned", None, declaration=declaration.to_dict())
 
     def _summary(self, node: Node) -> str:
         declaration = self.declaration()
@@ -589,6 +624,7 @@ class Scheduler:
         running: dict[str, tuple[TaskLoop, Job]] = {}
         poll_failures, failing_since = 0, None
         for loop in self.loops.values():
+            loop.recover()
             for job in loop.submitted_jobs():
                 running[job.key] = (loop, job)
                 self.log(f"[{job.key}] re-attached to a submitted {job.kind} job")
