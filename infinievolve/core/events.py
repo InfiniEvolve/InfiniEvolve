@@ -8,7 +8,7 @@ from pathlib import Path
 
 TYPES = ("campaign_init", "campaign_stop", "campaign_hold", "task_reset", "task_stop", "task_paused",
          "declaration_pinned", "declaration_mismatch", "confirm_changed", "baseline_scored", "selection", "prompt_rendered",
-         "session_reprepared",
+         "session_reprepared", "round_opened", "round_completed",
          "job_submitted", "job_started", "job_finished", "collected", "archived", "stop_check", "error",
          "poll_recovered", "agent_unavailable", "host_fault", "flagged", "flags_cleared",
          "confirmation_needed", "confirmation_sample", "rescored", "job_held", "host_excluded")
