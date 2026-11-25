@@ -203,6 +203,53 @@ def test_a_new_task_directory_runs_with_three_edits(tmp_path, capsys):
     assert (task / "runs" / "second" / "tasks" / "shorter" / "sessions" / "s001" / "node.json").is_file()
 
 
+def golf_campaign(tmp_path, tasks_dir: str) -> Path:
+    """`infinievolve new`, edited to run the golf example from <campaign>/<tasks_dir>/golf with its own agent."""
+    import yaml
+    campaign = tmp_path / "camp"
+    assert main(["new", str(campaign)]) == 0
+    config = yaml.safe_load((campaign / "config.yaml").read_text())
+    config["campaign"].update(tasks="all", poll_seconds=0.01)
+    config.pop("agent")
+    config["stop"]["max_sessions"] = 1
+    (campaign / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    shutil.copytree(REPOSITORY / "examples" / "golf", campaign / tasks_dir / "golf",
+                    ignore=shutil.ignore_patterns("__pycache__", "runs"))
+    return campaign
+
+
+@needs_git
+def test_resetting_a_task_of_a_new_campaign_keeps_the_task(tmp_path, capsys):
+    campaign = golf_campaign(tmp_path, "task-defs")      # where the template looks
+    assert main(["run", str(campaign)]) == 0
+    assert (campaign / "tasks" / "golf" / "sessions" / "s001" / "node.json").is_file()
+    assert main(["reset", str(campaign), "--task", "golf", "--reason", "again"]) == 0
+    assert not (campaign / "tasks" / "golf").exists()
+    task = campaign / "task-defs" / "golf"
+    assert (task / "task.yaml").is_file() and (task / "workspace" / "solution.py").is_file()
+    assert main(["run", str(campaign)]) == 0             # the lineage starts over from the same task
+    assert (campaign / "tasks" / "golf" / "sessions" / "s001" / "node.json").is_file()
+
+
+@pytest.mark.parametrize("options, empty_default", [({"tasks_dir": "tasks"}, False), ({"tasks_dir": "./tasks/"}, False),
+                                                    ({"task_dir": "tasks/golf"}, False), ({}, False), ({}, True)])
+def test_the_local_adapter_keeps_task_directories_out_of_the_archive(tmp_path, options, empty_default):
+    """A campaign's tasks/ is its archive and `reset` deletes a task's directory there: refuse to read task
+    directories from it, including from campaigns written when the template and the default pointed there."""
+    import yaml
+    campaign = golf_campaign(tmp_path, "tasks")
+    config = yaml.safe_load((campaign / "config.yaml").read_text())
+    config["options"] = options
+    (campaign / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    if empty_default:
+        (campaign / "task-defs").mkdir()
+    with pytest.raises(ValueError, match="where the campaign archives each task's sessions.*tasks_dir: task-defs"):
+        main(["check", str(campaign)])
+    with pytest.raises(ValueError, match="archives each task's sessions"):
+        main(["reset", str(campaign), "--task", "golf"])
+    assert (campaign / "tasks" / "golf" / "task.yaml").is_file()
+
+
 def test_named_agents_become_command_lines():
     from infinievolve.local import agent_command
     command, shell = agent_command({"spec": "claude/some-model:high"})

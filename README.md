@@ -212,7 +212,9 @@ stays in that directory. A task directory's runs are campaigns too: `infinievolv
 `mytask/runs/default/config.yaml` the first time, and that file is the run's configuration from then on.
 
 `infinievolve new` writes a config that lists every setting with a comment; `infinievolve check` reads a
-config (or a task directory) and says what it amounts to before anything is spent.
+config (or a task directory) and says what it amounts to before anything is spent. With the built-in
+adapter, a campaign's task directories go in `<campaign>/task-defs/` (`options.tasks_dir`), never in its
+`tasks/`: that is the archive, and `reset` deletes a task's directory there.
 
 `run` stays in the foreground for as long as the campaign lasts and prints a line per archived session.
 For a long campaign, start it where it survives your terminal (`nohup`, `tmux`) and send its output to a

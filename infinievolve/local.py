@@ -61,10 +61,12 @@ import yaml
 
 from . import transcripts
 from .core.adapter import AgentUnavailable, JobFailed, PromptText
+from .core.archive import CampaignStore
 from .core.prompt import extract_report
 from .core.types import ScoreRow, SessionResult
 
 GIT = ["git", "-c", "user.name=infinievolve", "-c", "user.email=infinievolve@localhost", "-c", "commit.gpgsign=false"]
+TASKS_DIR = "task-defs"   # options.tasks_dir when unset; never the campaign's own tasks/, which is its archive
 WORKING = ("Work in the directory you are started in. Whatever differs from its starting state when you end "
            "the session is your work.")
 
@@ -181,12 +183,25 @@ class LocalAdapter:
         self.options = dict(config.options)
         self.campaign = Path(config.root or ".").resolve()
         self.agent = config.defaults.agent
+        archive = CampaignStore(self.campaign).tasks_dir.resolve()
         if self.options.get("task_dir"):      # one task: the directory itself
-            directory = (self.campaign / self.options["task_dir"]).resolve()
+            key = "task_dir"
+            root = directory = (self.campaign / self.options["task_dir"]).resolve()
             self.tasks = {directory.name: directory}
         else:                                 # several: every directory with a task.yaml
-            root = (self.campaign / self.options.get("tasks_dir", "tasks")).resolve()
+            key = "tasks_dir"
+            root = (self.campaign / self.options.get("tasks_dir", TASKS_DIR)).resolve()
+            if "tasks_dir" not in self.options and not any(root.glob("*/task.yaml")) \
+                    and any(archive.glob("*/task.yaml")):
+                root = archive                # written when the default was tasks/: refused below, with the way out
             self.tasks = {path.parent.name: path.parent for path in sorted(root.glob("*/task.yaml"))}
+        if root == archive or archive in root.parents:
+            setting = f"options.{key}" if key in self.options else "This campaign"
+            raise ValueError(
+                f"{setting} puts task directories in {archive}, where the campaign archives each task's "
+                f"sessions; `infinievolve reset` deletes a task's directory there, task.yaml and workspace/ "
+                f"included. Move each task's own files (all but sessions/, archive/, rounds/ and task.json) to "
+                f"{self.campaign / TASKS_DIR}/<task>/ and set `options: {{tasks_dir: {TASKS_DIR}}}` in config.yaml")
         self._children: dict[str, subprocess.Popen] = {}
 
     # -- what the tasks are -----------------------------------------------------------

@@ -188,7 +188,9 @@ infinievolve new campaigns/first            # 生成一份带注释的 campaign 
 `mytask/runs/default/config.yaml`，此后这个文件就是该次运行的配置。
 
 `infinievolve new` 写出的配置列出了每一项设置并附有注释；`infinievolve check` 读取一份配置（或一个任务
-目录），在花费任何东西之前说明它实际意味着什么。
+目录），在花费任何东西之前说明它实际意味着什么。使用内置适配器时，campaign 的任务目录放在
+`<campaign>/task-defs/`（`options.tasks_dir`），不要放在它的 `tasks/` 里：那是归档目录，`reset` 会删除其中
+某个任务的整个目录。
 
 `run` 在 campaign 进行期间一直在前台运行，每归档一次会话打印一行。长时间的 campaign 请在不随终端退出
 的地方启动（`nohup`、`tmux`），并把输出写到文件。它被停止后，已提交的作业仍会继续，下一次 `run` 会
