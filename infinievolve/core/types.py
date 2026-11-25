@@ -47,6 +47,9 @@ class SessionSpec:
     prompt: str
     archive_md: str
     start_artifact: bytes | None      # the parent's archived work; None when starting from the baseline
+    round_id: str | None = None
+    parent_ids: list[str] = field(default_factory=list)
+    variation: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -115,6 +118,9 @@ class Node:
     flags_cleared: dict | None = None             # set once a person checked the flags
     error: str | None = None
     archived_at: str | None = None
+    round_id: str | None = None
+    parent_ids: list[str] = field(default_factory=list)
+    variation: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -23,7 +23,8 @@ from .schema import Declaration, parse_declaration
 from .types import Node
 
 COMPACT_FIELDS = ("session_id", "index", "parent_id", "start_strategy", "chosen_label", "artifact", "valid",
-                  "rank_metric", "rank_value", "scores", "report", "error", "flags", "flags_cleared")
+                  "rank_metric", "rank_value", "scores", "report", "error", "flags", "flags_cleared",
+                  "round_id", "parent_ids", "variation")
 
 
 def sha256_bytes(data: bytes) -> str:
