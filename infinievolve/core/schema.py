@@ -22,7 +22,8 @@
 
 An adapter gives the declaration for each of its tasks; a campaign's `evaluation:` section may override
 gate, rank_by, show and confirm. The declaration in force when the baseline is archived is fixed for the
-life of that lineage.
+life of that lineage, except `confirm`, which follows the campaign's configuration (it says how often a new
+best is scored again, not what a value means).
 """
 from __future__ import annotations
 

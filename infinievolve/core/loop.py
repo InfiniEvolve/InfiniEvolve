@@ -7,6 +7,7 @@ jobs reattach to their saved handles and retain their original inputs.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import time
@@ -105,11 +106,17 @@ class TaskLoop:
 
     def declaration(self) -> Declaration:
         """The lineage's declaration: fixed when the baseline is archived (task.json) and kept afterwards,
-        so one lineage never mixes values that mean different things."""
+        so one lineage never mixes values that mean different things.
+
+        `confirm` is the exception: it does not change what a value means, only how many more scorings a
+        new best gets before it is trusted, which an operator may want to change mid-campaign for its
+        cost. It follows the configuration; a change is written into task.json and recorded."""
         pinned = self.store.declaration()
         configured = self.configured_declaration()
         if pinned is None:
             return configured
+        if configured.confirm != pinned.confirm:
+            pinned = self._follow_confirm(pinned, configured)
         if configured.to_dict() != pinned.to_dict() and not self._mismatch_reported:
             self._mismatch_reported = True
             self.store.events.emit("declaration_mismatch", None, pinned=pinned.to_dict(),
@@ -117,6 +124,18 @@ class TaskLoop:
             self.log(f"[{self.task}] the configured declaration differs from the one this lineage is fixed to; "
                      "keeping the lineage's (reset the task to change it)")
         return pinned
+
+    def _follow_confirm(self, pinned: Declaration, configured: Declaration) -> Declaration:
+        """Take the configured `confirm` into the lineage's declaration. Confirmations already requested
+        finish with the number of scorings they were asked for; later new bests use the new setting."""
+        previous, current = pinned.to_dict()["confirm"], configured.to_dict()["confirm"]
+        meta = read_json(self.store.meta_path)
+        meta["declaration"]["confirm"] = current
+        write_json(self.store.meta_path, meta)
+        self.store.events.emit("confirm_changed", None, previous=previous, confirm=current)
+        said = lambda value: (f"{value['samples']} more scoring(s), {value['aggregate']}" if value else "off")
+        self.log(f"[{self.task}] confirm changed: {said(previous)} -> {said(current)}")
+        return replace(pinned, confirm=configured.confirm)
 
     def ranked(self, nodes: list[Node]) -> list[Node]:
         """The real sessions (selection and the stop rule see only these)."""

@@ -209,6 +209,40 @@ def test_the_declaration_is_fixed_for_the_life_of_a_lineage(tmp_path):
     assert state["tasks"]["a"]["best"] == 2.0                # still "higher is better"
 
 
+def test_confirm_follows_the_config_while_the_rest_stays_fixed(tmp_path):
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0, 4.0]}, rescore={"a": [2.0, 3.0, 4.0]},
+                             evaluation={"confirm": {"samples": 1}}, stop={"max_sessions": 1})
+    run(store, config)
+    assert len(events(store, "confirmation_needed")) == 1
+
+    # the operator turns confirmation off and allows one more session: s002 is a new best, not confirmed
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0, 4.0]}, rescore={"a": [2.0, 3.0, 4.0]},
+                             evaluation={"confirm": None}, stop={"max_sessions": 2})
+    _, adapter = run(store, config)
+    assert len(events(store, "confirmation_needed")) == 1 and adapter.rescored == {}
+    assert nodes(store)["s002"].rank_value == 3.0
+    assert not events(store, "declaration_mismatch")
+    changed = events(store, "confirm_changed")
+    assert len(changed) == 1 and changed[0]["data"] == {"previous": {"samples": 1, "aggregate": "median"},
+                                                        "confirm": None}
+    pinned = json.loads((tmp_path / "tasks" / "a" / "task.json").read_text())["declaration"]
+    assert pinned["confirm"] is None
+
+    # and back on: the next new best is confirmed again; the change is recorded once more, not on every run
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0, 4.0]}, rescore={"a": [2.0, 3.0, 4.0]},
+                             evaluation={"confirm": {"samples": 1, "aggregate": "mean"}}, stop={"max_sessions": 3})
+    run(store, config)
+    run(store, config)
+    assert len(events(store, "confirmation_needed")) == 2 and len(events(store, "confirm_changed")) == 2
+    assert nodes(store)["s003"].rank_value == 3.0       # mean of 4.0 and its repeat scoring 2.0
+
+    # the gate is still fixed
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 3.0, 4.0]}, stop={"max_sessions": 3},
+                             evaluation={"confirm": {"samples": 1, "aggregate": "mean"}, "gate": ["ok", "tidy"]})
+    run(store, config)
+    assert len(events(store, "declaration_mismatch")) == 1
+
+
 def test_a_declaration_that_ranks_by_an_unknown_metric_stops_the_task_before_any_job(tmp_path):
     store, config = campaign(tmp_path, {"a": [1.0, 2.0]}, evaluation={"rank_by": "speed"})
     state, _ = run(store, config)

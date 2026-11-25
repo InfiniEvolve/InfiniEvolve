@@ -151,7 +151,9 @@ artifact: patch                   # the form a session's work is archived in
   in `gate` is true; a check that was not reported counts as failed.
 - Ranking uses a single metric. Others are recorded, shown and exported.
 - The declaration in force when the baseline is archived is fixed for that lineage. To change it,
-  reset the task.
+  reset the task. `confirm` is the exception: it follows `config.yaml` on the next `run` (recorded as a
+  `confirm_changed` event), so repeat scorings can be turned down or off mid-campaign for their cost.
+  A confirmation already requested still finishes with the scorings it was asked for.
 
 ## What is in the archive
 
