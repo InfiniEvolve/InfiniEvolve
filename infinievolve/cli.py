@@ -1,4 +1,4 @@
-"""infinievolve init|new|check|run|status|report|export|reset|flag|clear
+"""infinievolve init|new|check|run|watch|status|report|export|reset|flag|clear
 
 Two ways to say what to run:
 
@@ -207,13 +207,86 @@ def cmd_new(args) -> int:
     return 0
 
 
+# The watch page is a plugin, EvolveVista, installed on request into the Python that runs InfiniEvolve.
+EVOLVE_VISTA = "git+https://github.com/InfiniEvolve/EvolveVista.git"
+WATCH_MISSING = "the watch page is the EvolveVista plugin, which is not installed: run `infinievolve install-watch`"
+
+
+def install_command(source: str) -> list[str]:
+    """The command that installs EvolveVista from source (a pip requirement, or a checkout to install editable)
+    into this Python: with pip when it has pip, else with uv (whose environments come without pip)."""
+    target = ["-e", source] if Path(source).is_dir() else [source]
+    import importlib.util
+    if importlib.util.find_spec("pip") is not None:
+        return [sys.executable, "-m", "pip", "install", "--upgrade", *target]
+    if shutil.which("uv"):
+        return ["uv", "pip", "install", "--python", sys.executable, "--upgrade", *target]
+    raise SystemExit(f"neither pip nor uv is available to {sys.executable}: install pip, or uv, and run this again")
+
+
+def cmd_install_watch(args) -> int:
+    """Install, or update, the watch page plugin (EvolveVista)."""
+    import subprocess
+    command = install_command(args.source or EVOLVE_VISTA)
+    print("installing the watch page (EvolveVista):", " ".join(command), flush=True)
+    code = subprocess.call(command)
+    if code == 0:
+        print("installed: `infinievolve watch <campaign>` and `infinievolve run ... --watch` now serve it")
+    return code
+
+
+def watch_page():
+    """EvolveVista's (Reader, serve), or exit saying how to install it."""
+    try:
+        from evolve_vista import Reader
+        from evolve_vista.cli import serve
+    except ImportError:
+        raise SystemExit(WATCH_MISSING)
+    return Reader, serve
+
+
+def start_watch(root: Path, args):
+    """The watch page for a campaign, EvolveVista's, served from a background thread with this package's
+    snapshot of the campaign; prints its address."""
+    Reader, serve = watch_page()
+    from .snapshot import snapshot, stamp
+    return serve(root, args, reader=Reader(snapshot, stamp))
+
+
+def hold(server) -> None:
+    """Keep the page served until Ctrl-C."""
+    import threading
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown(); server.server_close()
+
+
 def cmd_run(args) -> int:
+    if args.watch:
+        watch_page()   # before anything is written
     root = prepare_run(args)
     initialize(root)
     store, config, adapter, _ = opened(str(root))
+    server = start_watch(root, args) if args.watch else None
     state = Scheduler(store, config, adapter, log=lambda line: print(line, flush=True)).run()
     print((store.root / "summary.md").read_text(), end="")
+    if server is not None:
+        print(f"the run has ended; the page stays at {server.url} until Ctrl-C", flush=True)
+        hold(server)
     return 0 if not state.get("paused") else 2
+
+
+def cmd_watch(args) -> int:
+    """Serve the watch page for a campaign, running or finished, until Ctrl-C."""
+    root = campaign_dir(args.campaign, args.name)
+    if not (root / "config.yaml").is_file():
+        print(f"{root} has no runs yet: start one with `infinievolve run {args.campaign} --watch`", file=sys.stderr)
+        return 1
+    hold(start_watch(root, args))
+    return 0
 
 
 def cmd_status(args) -> int:
@@ -309,8 +382,13 @@ def main(argv: list[str] | None = None) -> int:
     new.add_argument("campaign", help="campaign directory to create")
     new.add_argument("--template", help="a config.yaml to copy (default: the commented template)")
     new.set_defaults(func=cmd_new)
+    plugin = sub.add_parser("install-watch", help="install or update the watch page, the EvolveVista plugin")
+    plugin.add_argument("--from", dest="source", metavar="SOURCE",
+                        help="install from here instead: an EvolveVista checkout (editable) or a pip requirement")
+    plugin.set_defaults(func=cmd_install_watch)
     for name, func, text in (("check", cmd_check, "say what a run would do, without starting anything"),
                              ("run", cmd_run, "run every task until it stops (re-attaches to running jobs)"),
+                             ("watch", cmd_watch, "follow a campaign in the browser: its lineage and best value"),
                              ("status", cmd_status, "print the campaign state"),
                              ("report", cmd_report, "rewrite and print the summary (and one task's matrix)"),
                              ("export", cmd_export, "write lineage graphs and CSVs to exports/"),
@@ -328,6 +406,15 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--agent-command", help="... or a shell command that runs any other agent")
             command.add_argument("--sessions", type=int, help="... the most sessions to run (default 10)")
             command.add_argument("--start", choices=("best", "explore", "baseline"), help="... where sessions start")
+        if name in ("run", "watch"):
+            if name == "run":
+                command.add_argument("--watch", action="store_true", help="also serve the watch page while it runs")
+            command.add_argument("--port", type=int, default=8765, help="the watch page's port (default 8765)")
+            command.add_argument("--open", action="store_true", help="open the watch page in the browser")
+            command.add_argument("--analyst", action="append", default=[], metavar="AGENT",
+                                 help="passed to EvolveVista: an agent the page may start to analyse a session "
+                                      "(<agent>[/<model>[:<effort>]] or <name>=<shell command>); repeatable")
+            command.add_argument("--no-agents", action="store_true", help="passed to EvolveVista: start no agents")
         if name == "report":
             command.add_argument("--task", help="also print this task's session matrix")
         if name == "reset":

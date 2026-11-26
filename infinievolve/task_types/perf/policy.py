@@ -8,7 +8,8 @@ MAX_DISPERSION = 0.5
 MAX_MISMATCH = 10.0
 
 
-def declaration(*, paired: bool, gate, samples: int = 2, flags: dict | None = None, exact: bool = False) -> dict:
+def declaration(*, paired: bool, gate, samples: int = 2, flags: dict | None = None, exact: bool = False,
+                solution: str | None = None) -> dict:
     """The declaration of a timing task.
 
     exact: the task's "speed" is a count (instructions, bytes, operations), the same every time it is taken.
@@ -17,6 +18,9 @@ def declaration(*, paired: bool, gate, samples: int = 2, flags: dict | None = No
     speedup          what the task's own evaluator reports: one timing against its baseline
     paired_speedup   the candidate against a reference, timed in alternation on one machine (see measure)
 
+    solution: the name of the reference when it is a known solution of the task rather than the baseline;
+    paired_speedup 1 is then as fast as that solution, and the curve marks it.
+
     Sessions are ranked by the paired value where the task can be paired, by the evaluator's otherwise. Either
     way a new best is scored `samples` more times and ranked by the median: even a paired timing varies.
     """
@@ -24,7 +28,8 @@ def declaration(*, paired: bool, gate, samples: int = 2, flags: dict | None = No
     if exact:
         paired, samples = False, 0
     if paired:
-        metrics["paired_speedup"] = {"direction": "max", "scale": "ratio", "anchor": "baseline", "format": "{:.3f}x"}
+        metrics["paired_speedup"] = {"direction": "max", "scale": "ratio", "anchor": "baseline", "format": "{:.3f}x",
+                                     **({"marks": {solution: 1.0}} if solution else {})}
         metrics["paired_dispersion"] = {"direction": "min", "scale": "absolute", "anchor": "none", "format": "{:.1%}"}
     return {"metrics": metrics, "gate": list(gate), "rank_by": "paired_speedup" if paired else "speedup",
             "show": ["paired_speedup", "speedup"] if paired else ["speedup"],

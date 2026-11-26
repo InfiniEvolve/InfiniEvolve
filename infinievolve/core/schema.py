@@ -9,6 +9,9 @@
                                  where the best-so-far curve starts: the baseline's own value, nothing
                                  until a session has one, or a fixed number
         format: "{:.3f}"         how the value is shown
+        marks: {<label>: <number>}
+                                 values worth a line on the curve, such as a known best solution's
+                                 (optional; only drawn, never ranks, and may change during a lineage)
     gate: [<check>, ...]         the evaluator's checks a version must all pass to be valid
                                  (default: every check the evaluator reports; [] for none)
     rank_by: <metric>            the one metric that chooses starting points and feeds the stop rule
@@ -57,6 +60,7 @@ class Metric:
     scale: str = "absolute"
     anchor: object = "baseline"       # "baseline" | "none" | a number
     format: str = "{:.3f}"
+    marks: tuple = ()                 # ((label, value), ...): lines on the curve, nothing else
 
     def usable(self, value) -> bool:
         """Whether a value can rank: a finite number, and positive on a ratio scale."""
@@ -86,7 +90,8 @@ class Metric:
         return self.format.format(value) if is_number(value) else "-"
 
     def to_dict(self) -> dict:
-        return {"direction": self.direction, "scale": self.scale, "anchor": self.anchor, "format": self.format}
+        data = {"direction": self.direction, "scale": self.scale, "anchor": self.anchor, "format": self.format}
+        return {**data, "marks": dict(self.marks)} if self.marks else data
 
 
 @dataclass(frozen=True)
@@ -143,6 +148,12 @@ class Declaration:
                 "report_fields": [{"name": name, "hint": hint} for name, hint in self.report_fields],
                 "artifact": self.artifact}
 
+    def without_marks(self) -> dict:
+        data = self.to_dict()
+        for metric in data["metrics"].values():
+            metric.pop("marks", None)
+        return data
+
     def merged(self, overrides: dict | None) -> "Declaration":
         """This declaration with a campaign's evaluation section applied."""
         overrides = dict(overrides or {})
@@ -154,17 +165,23 @@ class Declaration:
 
 def parse_metric(name: str, data: dict | None) -> Metric:
     data = dict(data or {})
-    unknown = set(data) - {"direction", "scale", "anchor", "format"}
+    unknown = set(data) - {"direction", "scale", "anchor", "format", "marks"}
     if unknown:
         raise ValueError(f"metrics.{name}: unsupported keys {sorted(unknown)}")
+    if not isinstance(data.get("marks") or {}, dict):
+        raise ValueError(f"metrics.{name}.marks must map a label to a number")
     metric = Metric(name=name, direction=str(data.get("direction", "max")), scale=str(data.get("scale", "absolute")),
-                    anchor=data.get("anchor", "baseline"), format=str(data.get("format", "{:.3f}")))
+                    anchor=data.get("anchor", "baseline"), format=str(data.get("format", "{:.3f}")),
+                    marks=tuple((str(label), value) for label, value in (data.get("marks") or {}).items()))
     if metric.direction not in DIRECTIONS:
         raise ValueError(f"metrics.{name}.direction must be one of {DIRECTIONS}")
     if metric.scale not in SCALES:
         raise ValueError(f"metrics.{name}.scale must be one of {SCALES}")
     if metric.anchor not in ("baseline", "none") and not metric.usable(metric.anchor):
         raise ValueError(f"metrics.{name}.anchor must be 'baseline', 'none' or a number the metric can hold")
+    for label, value in metric.marks:
+        if not metric.usable(value):
+            raise ValueError(f"metrics.{name}.marks.{label} must be a number the metric can hold")
     try:
         metric.format.format(1.0)
     except (IndexError, KeyError, ValueError) as error:

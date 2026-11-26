@@ -20,7 +20,7 @@ all come from outside it.
 Needs Python 3.10 or newer, and `git`.
 
 ```sh
-git clone https://github.com/xiemeimeiaaa/InfiniEvolve.git && cd InfiniEvolve
+git clone https://github.com/InfiniEvolve/InfiniEvolve.git && cd InfiniEvolve
 uv venv -p 3.11 .venv && uv pip install -p .venv -e .
 
 .venv/bin/infinievolve run examples/golf
@@ -108,6 +108,36 @@ When you need more:
 | run several tasks side by side | write a campaign config: `infinievolve new campaigns/first` |
 | run sessions on other machines, archive work that is not a set of file changes, read usage in your own way, check what an agent did | [write an adapter](docs/writing-an-adapter.md) |
 
+## Watching a run
+
+```sh
+infinievolve run mytask --agent claude/<model> --watch     # serve the page while it runs
+infinievolve watch mytask                                   # or from another terminal, or after it ended
+```
+
+The page is a plugin, [EvolveVista](https://github.com/InfiniEvolve/EvolveVista). Install it once:
+
+```sh
+infinievolve install-watch      # into the Python that runs infinievolve; run it again to update
+```
+
+<p align="center">
+  <img src="docs/images/evolvevista.png" alt="The watch page: a task's lineage and best-so-far curve with one session's details on the left, and that session's TraceVista analysis on the right" width="100%">
+</p>
+<p align="center"><sub>One task on the watch page: the lineage of its sessions, the best-so-far curve and the details of s004 on the left; s004's TraceVista analysis on the right.</sub></p>
+
+Either command then prints an address on this machine, `http://127.0.0.1:8765/#live=...`; open it (or add
+`--open`). The page shows each task's lineage, every session as a circle connected to the one it started
+from, with the value it is ranked by and its change against that parent, and below it the best value after
+each session; a campaign with several tasks shows them as tabs. Running sessions appear as soon as they are
+submitted; click a circle for its measurements, flags, cost and report. Drag a session onto the analysis area
+for its TraceVista analysis, written by an agent on this machine or a model you pick; `--analyst` and
+`--no-agents` are passed to EvolveVista, whose README describes them.
+
+InfiniEvolve's side is the snapshot, `infinievolve/snapshot.py`: the campaign as one JSON object, read from
+the archive only, which the page receives each time the campaign changes. `--port` picks another port; a
+taken one falls back to a free port.
+
 ## How it works
 
 Each task keeps one lineage. The unmodified baseline is scored first and becomes its root, `s000`; after
@@ -146,14 +176,17 @@ artifact: patch                   # the form a session's work is archived in
 - **direction** says which way is better; **scale** says whether differences (`absolute`) or quotients
   (`ratio`) are what compare, which decides how selection weighs candidates and how `min_improvement`
   is read (an amount, or a percentage); **anchor** says where the best-so-far curve starts: the
-  baseline's value by default, and the first valid session's when the baseline has none.
+  baseline's value by default, and the first valid session's when the baseline has none. **marks**
+  (optional, e.g. `marks: {"known best": 0.92}`) are values drawn as lines on the watch page's curve;
+  they never rank and may change during a lineage.
 - The evaluator reports named **checks** for each version it scores. A version is valid when every check
   in `gate` is true; a check that was not reported counts as failed.
 - Ranking uses a single metric. Others are recorded, shown and exported.
 - The declaration in force when the baseline is archived is fixed for that lineage. To change it,
-  reset the task. `confirm` is the exception: it follows `config.yaml` on the next `run` (recorded as a
-  `confirm_changed` event), so repeat scorings can be turned down or off mid-campaign for their cost.
-  A confirmation already requested still finishes with the scorings it was asked for.
+  reset the task. Two parts are exceptions. `confirm` follows `config.yaml` on the next `run` (recorded as a
+  `confirm_changed` event), so repeat scorings can be turned down or off mid-campaign for their cost; a
+  confirmation already requested still finishes with the scorings it was asked for. A metric's marks are
+  only drawn, never ranked, so the lineage takes the configured ones.
 
 ## What is in the archive
 
@@ -198,7 +231,8 @@ runs (`default` when left out).
 infinievolve init mytask                    # a new task directory to fill in
 infinievolve check <target> [--prompt]      # what a run would do, and its first prompt; starts nothing
 infinievolve run <target> [--name N]        # can be interrupted and run again
-        [--agent claude/<model> | --agent-command "..."] [--sessions N] [--start best|explore|baseline]
+infinievolve watch <target> [--open]        # the lineage and best value in the browser, live
+        [--agent claude/<model> | --agent-command "..."] [--sessions N] [--start best|explore|baseline] [--watch]
                                             # ... the settings of a task directory's run, given at its first run
 infinievolve status <target>
 infinievolve report <target> [--task T]

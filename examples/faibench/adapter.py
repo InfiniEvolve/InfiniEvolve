@@ -169,6 +169,9 @@ class FaiBenchAdapter(PerfAdapter):
             return "a reference solution of the task"
         return "the unmodified baseline (or, when that does not run, the first valid session's version)"
 
+    def paired_solution(self, task: str) -> str | None:
+        return "oracle" if self.can_pair(task) and self.oracle(task) else None
+
     def hardware(self, task: str) -> str:
         resources = self.resources(task)
         return f"{resources['cpus']} CPU cores" + (" and one GPU" if resources["gpus"] else "")

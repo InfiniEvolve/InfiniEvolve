@@ -19,7 +19,7 @@
 需要 Python 3.10 或更高版本，以及 `git`。
 
 ```sh
-git clone https://github.com/xiemeimeiaaa/InfiniEvolve.git && cd InfiniEvolve
+git clone https://github.com/InfiniEvolve/InfiniEvolve.git && cd InfiniEvolve
 uv venv -p 3.11 .venv && uv pip install -p .venv -e .
 
 .venv/bin/infinievolve run examples/golf
@@ -93,6 +93,33 @@ infinievolve report mytask --task mytask
 | 同时跑多个任务 | 写一份 campaign 配置：`infinievolve new campaigns/first` |
 | 在别的机器上跑会话、归档不是文件改动的成果、按自己的方式读取用量、检查 agent 做了什么 | [编写适配器](docs/writing-an-adapter.zh-CN.md) |
 
+## 实时查看运行
+
+```sh
+infinievolve run mytask --agent claude/<model> --watch     # 运行的同时提供查看页面
+infinievolve watch mytask                                   # 或者在另一个终端里看，跑完之后也能看
+```
+
+页面是一个插件 [EvolveVista](https://github.com/InfiniEvolve/EvolveVista)，装一次即可：
+
+```sh
+infinievolve install-watch      # 装进运行 infinievolve 的 Python；再运行一次就是更新
+```
+
+<p align="center">
+  <img src="docs/images/evolvevista.png" alt="查看页面：左边是一个任务的谱系、最好值曲线和一个会话的详情，右边是这个会话的 TraceVista 分析" width="100%">
+</p>
+<p align="center"><sub>查看页面上的一个任务：左边是会话谱系、最好值曲线和 s004 的详情；右边是 s004 的 TraceVista 分析。</sub></p>
+
+之后上面两条命令都会打印一个本机地址 `http://127.0.0.1:8765/#live=...`，打开即可（加 `--open` 会自动打开
+浏览器）。页面上是每个任务的谱系：每个会话一个圆圈，连到它起点所在的会话，显示排名用的指标值和相对父节点的
+变化；下方是每次会话后的最好值曲线；有多个任务时以标签页切换。会话一提交就会出现；点圆圈可以看它的各项指标、
+标记、花费和报告。把会话拖到分析区，可以得到它的 TraceVista 分析，由本机的 agent 或你选的模型来写；
+`--analyst` 和 `--no-agents` 会原样交给 EvolveVista，具体见它的 README。
+
+InfiniEvolve 这边只负责快照 `infinievolve/snapshot.py`：只从归档读出整个 campaign，生成一个 JSON 对象；campaign
+每次变化，页面就收到新的快照。`--port` 可以换端口；端口被占用时自动换一个空闲端口。
+
 ## 工作流程
 
 每个任务维护一条谱系。先给未修改的 baseline 打分，作为根节点 `s000`；之后重复图中的循环，直到会话数
@@ -125,13 +152,16 @@ artifact: patch                   # 会话成果以什么形式归档
 
 - **direction** 说明哪个方向更好。**scale** 说明可比较的是差值（`absolute`）还是比值（`ratio`），
   它决定选择起点时如何给候选加权，以及 `min_improvement` 按数量还是按百分比理解。**anchor** 说明
-  最好成绩曲线从哪里起算：默认是 baseline 的值，baseline 没有值时是第一个有效会话的值。
+  最好成绩曲线从哪里起算：默认是 baseline 的值，baseline 没有值时是第一个有效会话的值。**marks**
+  （可选，如 `marks: {"known best": 0.92}`）是在观察页曲线上画成横线的参考值，不参与排名，
+  谱系进行中也可以修改。
 - 评估器为它打分的每个版本报告一组具名**检查**。`gate` 中列出的检查全部为真，这个版本才有效；
   没有报告的检查按未通过处理。
 - 排名只用一个指标，其余指标照常记录、展示和导出。
-- baseline 归档时生效的声明对这条谱系固定不变。要更换声明，需要重置该任务。`confirm` 例外：下一次
-  `run` 时它跟随 `config.yaml`（记为 `confirm_changed` 事件），因此可以出于成本在 campaign 中途减少
-  或关闭复测。已经发起的复测仍按当时要求的次数完成。
+- baseline 归档时生效的声明对这条谱系固定不变。要更换声明，需要重置该任务。有两处例外。`confirm`
+  在下一次 `run` 时跟随 `config.yaml`（记为 `confirm_changed` 事件），因此可以出于成本在 campaign
+  中途减少或关闭复测；已经发起的复测仍按当时要求的次数完成。指标的 marks 只用于画图、不参与排名，
+  因此谱系直接采用配置里的 marks。
 
 ## 档案里有什么
 
@@ -174,7 +204,8 @@ artifact: patch                   # 会话成果以什么形式归档
 infinievolve init mytask                    # 新建一个待填写的任务目录
 infinievolve check <target> [--prompt]      # 说明一次运行会做什么，并给出第一条提示词；不启动任何东西
 infinievolve run <target> [--name N]        # 可以中断后再次运行
-        [--agent claude/<model> | --agent-command "..."] [--sessions N] [--start best|explore|baseline]
+infinievolve watch <target> [--open]        # 在浏览器里实时查看谱系和最好值
+        [--agent claude/<model> | --agent-command "..."] [--sessions N] [--start best|explore|baseline] [--watch]
                                             # ……任务目录某次运行的设置，在它第一次运行时给出
 infinievolve status <target>
 infinievolve report <target> [--task T]

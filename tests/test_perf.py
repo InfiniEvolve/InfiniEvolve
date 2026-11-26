@@ -114,7 +114,9 @@ def test_a_machine_is_dropped_on_its_second_unreproduced_measurement(tmp_path):
 def test_what_a_timing_task_declares():
     paired = parse_declaration(policy.declaration(paired=True, gate=["correct"]))
     assert paired.rank_by == "paired_speedup" and paired.show == ("paired_speedup", "speedup")
-    assert paired.confirm.samples == 2 and paired.rank.scale == "ratio"
+    assert paired.confirm.samples == 2 and paired.rank.scale == "ratio" and paired.rank.marks == ()
+    solved = parse_declaration(policy.declaration(paired=True, gate=["correct"], solution="oracle"))
+    assert solved.rank.marks == (("oracle", 1.0),)
     alone = parse_declaration(policy.declaration(paired=False, gate=["correct"], samples=3))
     assert alone.rank_by == "speedup" and alone.confirm.samples == 3 and "paired_speedup" not in alone.metrics
     exact = parse_declaration(policy.declaration(paired=True, gate=["correct"], exact=True))
