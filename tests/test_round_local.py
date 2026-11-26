@@ -10,7 +10,7 @@ from infinievolve.adapters import make_adapter
 from infinievolve.config import campaign_config
 from infinievolve.core.archive import CampaignStore, read_json
 from infinievolve.core.loop import Scheduler
-from infinievolve.local import fresh_copy
+from infinievolve.local import fresh_copy, transcript_path
 
 
 def test_local_processes_restore_primary_and_deliver_donor(tmp_path, monkeypatch):
@@ -40,9 +40,20 @@ time.sleep(0.1)
     store = CampaignStore(campaign)
     state = Scheduler(store, config, make_adapter(config), log=lambda _:None).run()
     assert not state['paused'] and state['sessions'] == 4
+    for node in store.task('task').nodes()[1:]:     # the watch page reads each agent's output by this name
+        raw = campaign / 'tasks' / 'task' / 'sessions' / node.session_id / 'raw'
+        assert (raw / 'agent.jsonl').is_file() and not (raw / 'agent.log').exists()
     for node in store.task('task').nodes()[3:]:
         assert node.valid and len(node.parent_ids) == 2
         check = tmp_path / ('verify-' + node.session_id)
         assert fresh_copy(task / 'workspace', check, store.task('task').artifact(node.session_id)) is None
         evidence = json.loads((check / 'evidence.json').read_text())
         assert evidence['donor'] and node.parent_id in evidence['initial']
+
+
+def test_transcript_path_reads_the_name_of_runs_made_before_agent_jsonl(tmp_path):
+    assert transcript_path(tmp_path) == tmp_path / 'agent.jsonl'          # a new session writes this
+    (tmp_path / 'agent.log').write_text('{}\n')
+    assert transcript_path(tmp_path) == tmp_path / 'agent.log'            # a session resumed from an older run
+    (tmp_path / 'agent.jsonl').write_text('{}\n')
+    assert transcript_path(tmp_path) == tmp_path / 'agent.jsonl'

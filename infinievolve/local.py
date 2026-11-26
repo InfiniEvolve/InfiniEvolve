@@ -64,6 +64,18 @@ from .core.adapter import AgentUnavailable, JobFailed, PromptText
 from .core.prompt import extract_report
 from .core.types import ScoreRow, SessionResult
 
+# The agent's output, kept in a session's raw/. agent.jsonl is the name the watch page (EvolveVista) and the
+# other adapters use; runs made before it was adopted kept it as agent.log, which a resumed run still reads.
+TRANSCRIPT = "agent.jsonl"
+OLD_TRANSCRIPT = "agent.log"
+
+
+def transcript_path(raw: Path) -> Path:
+    """The agent's output in a session's raw/: agent.jsonl, or agent.log in a run made before that name."""
+    old = raw / OLD_TRANSCRIPT
+    return old if old.is_file() and not (raw / TRANSCRIPT).is_file() else raw / TRANSCRIPT
+
+
 GIT = ["git", "-c", "user.name=infinievolve", "-c", "user.email=infinievolve@localhost", "-c", "commit.gpgsign=false"]
 WORKING = ("Work in the directory you are started in. Whatever differs from its starting state when you end "
            "the session is your work.")
@@ -151,7 +163,7 @@ def run_job(session_dir: Path) -> None:
         environment = {**os.environ, **request["environment"], "EVOLVE_PROMPT": request["prompt"],
                        "EVOLVE_ARCHIVE": request["archive"], "EVOLVE_WORKSPACE": str(work)}
         began = time.time()
-        with (raw / "agent.log").open("w") as log, open(request["prompt"], "rb") as prompt:
+        with (raw / TRANSCRIPT).open("w") as log, open(request["prompt"], "rb") as prompt:
             try:
                 done = subprocess.run(request["agent_command"], shell=request["agent_shell"], cwd=work, env=environment,
                                       stdin=prompt, stdout=log, stderr=subprocess.STDOUT,
@@ -301,7 +313,7 @@ class LocalAdapter:
         artifacts = {"final": (raw / "final.patch").read_bytes()}
         if job.kind != "session":
             return SessionResult(scores=[row], artifacts=artifacts, timing=result["timing"])
-        transcript = raw / "agent.log"
+        transcript = transcript_path(raw)
         refused = transcripts.refusal(transcript)
         if refused:
             shutil.rmtree(raw, ignore_errors=True)
