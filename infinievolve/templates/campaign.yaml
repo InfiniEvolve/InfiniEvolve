@@ -61,5 +61,6 @@ prompt:
 #     max_sessions: 6
 
 # Passed to the adapter as they are. For `local`: where the task directories are, relative to this file.
+# Not `tasks`: that directory is this campaign's archive, and `reset` deletes a task's directory there.
 options:
-  tasks_dir: tasks
+  tasks_dir: task-defs

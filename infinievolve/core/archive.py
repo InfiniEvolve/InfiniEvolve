@@ -63,8 +63,13 @@ class CampaignStore:
     def exports_dir(self) -> Path:
         return self.root / "exports"
 
+    @property
+    def tasks_dir(self) -> Path:
+        """Where each task's lineage lives; `reset` deletes a task's directory here, so nothing else belongs in it."""
+        return self.root / "tasks"
+
     def task(self, name: str) -> "TaskStore":
-        return TaskStore(self.root / "tasks" / name, self.events.for_task(name), name)
+        return TaskStore(self.tasks_dir / name, self.events.for_task(name), name)
 
 
 class TaskStore:
