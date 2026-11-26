@@ -155,7 +155,9 @@ them did not beat the best value by more than `min_improvement`.
   those before it. Different tasks run side by side, up to `max_parallel` jobs at once.
 - **Interruptions.** A run can be stopped at any point; running it again re-attaches to jobs that are
   still going. A session that was prepared but never submitted (a crash, or a submit the adapter
-  refused) keeps its id but is prepared again from the current instruction, prompt and archive.
+  refused) keeps its id but is prepared again from the current instruction, prompt and archive. What
+  a crash cut short after archiving a session or a repeat scoring is finished first, so a new best is
+  still scored again before any session starts from it.
 
 ## What you declare
 

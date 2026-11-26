@@ -5,6 +5,7 @@
       tasks/<task>/
         task.json                    the declaration this lineage is fixed to
         sessions/<sid>/{input/, raw/, derived/, job.json, node.json, manifest.json}
+        sessions/<sid>/settle.json   archived, but not yet pooled and checked for a repeat scoring
         archive/{nodes/<sid>.json, artifacts/<sid><suffix>, archive.jsonl, matrix.{json,md}}
       exports/
 
@@ -146,7 +147,8 @@ class TaskStore:
 
     def write_manifest(self, sid: str) -> dict:
         root = self.session_dir(sid)
+        skipped = ("manifest.json", "settle.json")   # settle.json is gone once the session is settled
         manifest = {str(path.relative_to(root)): sha256_file(path)
-                    for path in sorted(root.rglob("*")) if path.is_file() and path.name != "manifest.json"}
+                    for path in sorted(root.rglob("*")) if path.is_file() and path.name not in skipped}
         write_json(root / "manifest.json", manifest)
         return manifest
