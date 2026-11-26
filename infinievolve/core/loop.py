@@ -108,15 +108,21 @@ class TaskLoop:
         """The lineage's declaration: fixed when the baseline is archived (task.json) and kept afterwards,
         so one lineage never mixes values that mean different things.
 
-        `confirm` is the exception: it does not change what a value means, only how many more scorings a
+        `confirm` is one exception: it does not change what a value means, only how many more scorings a
         new best gets before it is trusted, which an operator may want to change mid-campaign for its
-        cost. It follows the configuration; a change is written into task.json and recorded."""
+        cost. It follows the configuration; a change is written into task.json and recorded. The metric's
+        marks are the other: they never rank, they are only drawn, so the lineage takes the configured ones."""
         pinned = self.store.declaration()
         configured = self.configured_declaration()
         if pinned is None:
             return configured
         if configured.confirm != pinned.confirm:
             pinned = self._follow_confirm(pinned, configured)
+        if configured.to_dict() != pinned.to_dict() and configured.without_marks() == pinned.without_marks():
+            # marks are only drawn: the lineage takes the configured ones
+            meta = read_json(self.store.meta_path) or {}
+            write_json(self.store.meta_path, {**meta, "declaration": configured.to_dict()})
+            return configured
         if configured.to_dict() != pinned.to_dict() and not self._mismatch_reported:
             self._mismatch_reported = True
             self.store.events.emit("declaration_mismatch", None, pinned=pinned.to_dict(),

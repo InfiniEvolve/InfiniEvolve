@@ -60,8 +60,9 @@ archives the result                                                      derived
 ```
 
 `input/` is the framework's, plus whatever you add for your own job. `raw/` is yours entirely: keep the
-transcript, logs and evaluator output there, since nothing else records them. `derived/`, `job.json`,
-`node.json` and `manifest.json` are the framework's; do not write them.
+transcript, logs and evaluator output there, since nothing else records them. Keep the agent's transcript
+as `raw/agent.jsonl` (its stream-json output, one event per line): the watch page analyses a session from
+that file. `derived/`, `job.json`, `node.json` and `manifest.json` are the framework's; do not write them.
 
 A session's work reaches you as bytes: `spec.start_artifact` (also on disk as `input/start<suffix>`, the
 suffix being the artifact kind's, `.patch` for the default kind). It is exactly what you returned as that

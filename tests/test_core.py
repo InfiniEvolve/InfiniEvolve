@@ -44,6 +44,8 @@ def test_a_declaration_with_one_metric_ranks_by_it():
     ({"metrics": {"a": {"scale": "log"}}}, "scale"),
     ({"metrics": {"a": {"scale": "ratio", "anchor": 0}}}, "anchor"),
     ({"metrics": {"a": {"format": "{:d}"}}}, "format"),
+    ({"metrics": {"a": {"marks": [1.0]}}}, "marks"),
+    ({"metrics": {"a": {"scale": "ratio", "marks": {"zero": 0}}}}, "marks.zero"),
     ({"metrics": {"a": {}}, "show": ["b"]}, "undeclared"),
     ({"metrics": {"a": {}}, "flags": {"x": "severe"}}, "levels"),
     ({"metrics": {"a": {}}, "confirm": {"samples": 0}}, "confirm"),

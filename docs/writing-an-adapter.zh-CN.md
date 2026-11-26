@@ -57,7 +57,9 @@
 ```
 
 `input/` 归框架所有，你可以往里加自己作业需要的文件。`raw/` 完全归你：对话记录、日志、评估器输出都放
-在这里，因为别处不会记录它们。`derived/`、`job.json`、`node.json` 和 `manifest.json` 归框架，不要写。
+在这里，因为别处不会记录它们。agent 的对话记录请存为 `raw/agent.jsonl`（它的 stream-json 输出，每行一
+个事件）：查看页面从这个文件分析会话。`derived/`、`job.json`、`node.json` 和 `manifest.json` 归框架，不
+要写。
 
 会话的成果以字节形式交给你：`spec.start_artifact`（磁盘上同时有 `input/start<后缀>`，后缀由成果类型
 决定，默认类型是 `.patch`）。它就是你当初作为该节点的成果返回的内容，所以还原它就是你保存它的逆

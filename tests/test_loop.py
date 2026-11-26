@@ -243,6 +243,17 @@ def test_confirm_follows_the_config_while_the_rest_stays_fixed(tmp_path):
     assert len(events(store, "declaration_mismatch")) == 1
 
 
+def test_marks_are_only_drawn_and_a_lineage_takes_new_ones(tmp_path):
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 2.0, 2.0]})
+    run(store, config)
+    marked = {"metrics": {"score": {"direction": "max", "scale": "ratio", "anchor": "baseline", "marks": {"known best": 3.0}}}}
+    store, config = campaign(tmp_path, {"a": [1.0, 2.0, 2.0, 2.0, 0.5, 0.5]}, declaration=marked,
+                             stop={"max_sessions": 5})
+    run(store, config)
+    assert not events(store, "declaration_mismatch")
+    assert store.task("a").declaration().rank.marks == (("known best", 3.0),)
+
+
 def test_a_declaration_that_ranks_by_an_unknown_metric_stops_the_task_before_any_job(tmp_path):
     store, config = campaign(tmp_path, {"a": [1.0, 2.0]}, evaluation={"rank_by": "speed"})
     state, _ = run(store, config)

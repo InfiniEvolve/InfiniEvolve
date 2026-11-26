@@ -44,7 +44,13 @@ class PerfAdapter:
 
     def declaration(self, task: str) -> dict:
         return policy.declaration(paired=self.pairs_with(task) is not None, gate=self.gate,
-                                  samples=self.confirm_samples, flags=self.flag_levels(), exact=self.exact(task))
+                                  samples=self.confirm_samples, flags=self.flag_levels(), exact=self.exact(task),
+                                  solution=self.paired_solution(task))
+
+    def paired_solution(self, task: str) -> str | None:
+        """The name of the known solution paired timings compare against, or None when they compare against
+        the baseline (or the first valid session)."""
+        return None
 
     def prompt_text(self, task: str) -> PromptText:
         reference = None if self.exact(task) else self.pairs_with(task)
